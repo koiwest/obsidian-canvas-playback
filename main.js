@@ -1,4 +1,4 @@
-const { MarkdownRenderer, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile } = require("obsidian");
+const { MarkdownRenderer, Modal, Notice, Plugin, PluginSettingTab, Setting, TFile, requestUrl } = require("obsidian");
 const fs = require("fs");
 const path = require("path");
 const { pathToFileURL } = require("url");
@@ -1039,7 +1039,7 @@ class CanvasPlayerModal extends Modal {
     }
 
     if (item.type === "presentation") {
-      await this.renderIframeSlide(slideEl, item, "canvas-player-presentation-frame");
+      await this.renderPresentationSlide(slideEl, item);
       return;
     }
 
@@ -1084,6 +1084,34 @@ class CanvasPlayerModal extends Modal {
       },
     });
     await waitForMediaLoad(audio);
+  }
+
+  async renderPresentationSlide(slideEl, item) {
+    if (item.provider === "figma") {
+      const preview = await getFigmaSlidePreview(item.sourceUrl);
+      if (preview?.url) {
+        await this.renderRemoteImageSlide(slideEl, {
+          url: preview.url,
+          title: item.title || preview.title || "Figma slide",
+        });
+        return;
+      }
+    }
+
+    await this.renderIframeSlide(slideEl, item, "canvas-player-presentation-frame");
+  }
+
+  async renderRemoteImageSlide(slideEl, item) {
+    const img = slideEl.createEl("img", {
+      cls: "canvas-player-remote-slide-image",
+      attr: { src: item.url, alt: item.title },
+    });
+    img.draggable = false;
+    const loaded = await waitForMediaLoad(img);
+    if (!loaded) {
+      img.remove();
+      renderSlideError(slideEl, `Could not load remote slide: ${item.title}`);
+    }
   }
 
   async renderIframeSlide(slideEl, item, className) {
@@ -1412,6 +1440,41 @@ function createFigmaPresentationEmbed(url) {
     sourceUrl: url.toString(),
     url: embedUrl.toString(),
   };
+}
+
+async function getFigmaSlidePreview(sourceUrl) {
+  if (!sourceUrl) return null;
+
+  const oembedUrl = new URL("https://www.figma.com/api/oembed");
+  oembedUrl.searchParams.set("url", sourceUrl);
+  oembedUrl.searchParams.set("maxwidth", "1920");
+  oembedUrl.searchParams.set("maxheight", "1080");
+
+  try {
+    const response = await requestUrl({ url: oembedUrl.toString(), method: "GET" });
+    const data = response.json || JSON.parse(response.text);
+    if (!data?.thumbnail_url) return null;
+    return {
+      title: data.title || "",
+      url: upscaleFigmaThumbnailUrl(data.thumbnail_url),
+      width: data.thumbnail_width || data.width || 0,
+      height: data.thumbnail_height || data.height || 0,
+    };
+  } catch (_error) {
+    return null;
+  }
+}
+
+function upscaleFigmaThumbnailUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    if (url.searchParams.has("height")) {
+      url.searchParams.set("height", "1080");
+    }
+    return url.toString();
+  } catch (_error) {
+    return rawUrl;
+  }
 }
 
 function createGammaPresentationEmbed(url) {

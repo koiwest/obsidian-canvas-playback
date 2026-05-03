@@ -67,6 +67,11 @@
   display: block;
 }
 
+.canvas-player-remote-slide-image {
+  background: #000;
+  object-fit: contain;
+}
+
 .canvas-player-embed-shell {
   position: absolute;
   top: 50%;
