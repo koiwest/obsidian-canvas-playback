@@ -724,16 +724,14 @@ class CanvasPlayerModal extends Modal {
     this.contentEl.empty();
   }
 
-  async showIndex(index) {
+  showIndex(index) {
     if (index < 0 || index >= this.items.length) return;
 
-    const token = ++this.transitionToken;
+    ++this.transitionToken;
     this.index = index;
     this.updateOutline();
 
-    const targetSlideEl = await this.ensureSlide(index);
-    if (token !== this.transitionToken) return;
-
+    const targetSlideEl = this.ensureSlide(index);
     const previousSlideEl = this.activeSlideEl;
     this.activeSlideEl = targetSlideEl;
     targetSlideEl.addClass("is-active");
@@ -825,10 +823,9 @@ class CanvasPlayerModal extends Modal {
     });
   }
 
-  async ensureSlide(index) {
+  ensureSlide(index) {
     const cached = this.slideCache.get(index);
     if (cached) {
-      await cached.ready;
       return cached.el;
     }
 
@@ -844,7 +841,6 @@ class CanvasPlayerModal extends Modal {
       return slideEl;
     });
     this.slideCache.set(index, { el: slideEl, ready });
-    await ready;
     return slideEl;
   }
 
@@ -930,7 +926,7 @@ class CanvasPlayerModal extends Modal {
     const start = Math.max(0, index - PRELOAD_RADIUS);
     const end = Math.min(this.items.length - 1, index + PRELOAD_RADIUS);
     for (let i = start; i <= end; i += 1) {
-      this.ensureSlide(i).catch(() => {});
+      this.ensureSlide(i);
     }
 
     const activeEntryIndex = findActiveOutlineEntry(this.outlineEntries, index);
@@ -941,7 +937,7 @@ class CanvasPlayerModal extends Modal {
       if (!entry) return;
       const entryWarmEnd = Math.min(entry.endIndex, entry.startIndex + 2);
       for (let i = entry.startIndex; i <= entryWarmEnd; i += 1) {
-        this.ensureSlide(i).catch(() => {});
+        this.ensureSlide(i);
       }
     });
   }
@@ -969,7 +965,7 @@ class CanvasPlayerModal extends Modal {
 
     const warm = () => {
       for (let i = 0; i < this.items.length; i += 1) {
-        this.ensureSlide(i).catch(() => {});
+        this.ensureSlide(i);
       }
     };
 
@@ -1111,7 +1107,9 @@ function getOutlineKey(item) {
 }
 
 function cleanOutlineTitle(title) {
-  return String(title || "Untitled").replace(/^komorebi · media\//, "").replace(/^#+\s*/, "");
+  const cleaned = String(title || "Untitled").replace(/^#+\s*/, "").replace(/^komorebi · media\//, "");
+  if (/^https?:\/\//i.test(cleaned)) return cleaned;
+  return cleaned.split(/[\\/]/).filter(Boolean).pop() || cleaned;
 }
 
 function getOutlineDetail(item) {

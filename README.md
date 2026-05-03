@@ -6,6 +6,12 @@ Play connected PDFs, slide decks, videos, images, web pages, and notes from your
 
 **Connect files. Play the flow.**
 
+![Canvas Playback demo](docs/assets/canvas-playback-demo.gif)
+
+![Canvas Playback canvas path](docs/assets/canvas-playback-1.png)
+
+![Canvas Playback fullscreen player](docs/assets/canvas-playback-2.png)
+
 ## 它解决什么
 
 Canvas 本来就是思路的地图。Canvas Playback 做的事很简单：把这张地图变成一条可播放的路径。你把文件放进 Canvas，用线连接顺序，然后按下播放。每一个节点都成为一个全屏片段。
@@ -148,17 +154,19 @@ npm run verify:canvas
 
 ## 展示素材
 
-这里需要两类素材：
+现在已有一段动图和两张展示图，放在 `docs/assets/`。
 
-- 一张 Canvas 连接路径截图。
-- 一段从 Canvas 到全屏播放的短录屏。
+- `canvas-playback-demo.gif`
+- `canvas-playback-1.png`
+- `canvas-playback-2.png`
 
 ## Showcase Assets
 
-This project needs two assets:
+The repository includes one animated demo and two screenshots under `docs/assets/`.
 
-- A screenshot of a connected Canvas path.
-- A short recording from Canvas to fullscreen playback.
+- `canvas-playback-demo.gif`
+- `canvas-playback-1.png`
+- `canvas-playback-2.png`
 
 ## License
 
