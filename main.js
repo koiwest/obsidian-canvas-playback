@@ -754,19 +754,16 @@ class CanvasPlayerModal extends Modal {
     this.outlineButtons = this.outlineEntries.map((entry) => {
       const button = list.createEl("button", {
         cls: "canvas-player-outline-item",
-        attr: { type: "button" },
+        attr: { type: "button", "data-start-index": String(entry.startIndex) },
       });
       button.createSpan({ cls: "canvas-player-outline-item-name", text: entry.title });
       if (entry.detail) {
         button.createSpan({ cls: "canvas-player-outline-item-detail", text: entry.detail });
       }
-      button.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        this.jumpToOutlineEntry(entry);
-      });
       return button;
     });
+    list.addEventListener("pointerdown", (event) => this.handleOutlineJumpEvent(event), true);
+    list.addEventListener("click", (event) => this.handleOutlineJumpEvent(event), true);
     this.outlineEl.addEventListener("mouseenter", () => this.setOutlineOpen(true));
     this.outlineEl.addEventListener("mouseleave", (event) => {
       if (event.clientX > 310) this.setOutlineOpen(false);
@@ -953,6 +950,20 @@ class CanvasPlayerModal extends Modal {
 
   jumpToOutlineEntry(entry) {
     this.showIndex(entry.startIndex);
+  }
+
+  handleOutlineJumpEvent(event) {
+    const button = event.target?.closest?.(".canvas-player-outline-item");
+    if (!button) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation?.();
+
+    const startIndex = Number(button.dataset.startIndex);
+    if (Number.isInteger(startIndex)) {
+      this.showIndex(startIndex);
+    }
   }
 
   scheduleDeckWarmup() {
