@@ -12,29 +12,13 @@ Play connected PDFs, slide decks, videos, images, web pages, and notes from your
 
 ![Canvas Playback demo](docs/assets/canvas-playback-demo.gif)
 
-## 它解决什么
-
-Canvas 本来就是思路的地图。Canvas Playback 做的事很简单：把这张地图变成一条可播放的路径。你把文件放进 Canvas，用线连接顺序，然后按下播放。每一个节点都成为一个全屏片段。
-
-Canvas is already a map of thought. Canvas Playback turns that map into a playable path. Drop files into a Canvas, connect them in order, then play. Each node becomes a fullscreen step.
-
-## 为什么做它
-
 工作的时候，我经常要在投屏电视上连续播放很多个不同格式、不同来源的 PPT 类文件。在文件之间切换软件很难受，直接用 Apple 的 preview 播放又经常不可控，有时候不全屏，有时候不完整。我很喜欢飞书的内置放映功能，所以常常把十几个文件发给飞书里的自己，再在对话框里依次点击各个文件。但显得我很忙乱，而且很不优雅！
 
 后来我想到，Canvas 本来就是极好的放映控制台。我可以用箭头随时指向和更改播放顺序，他像一个观察者的控制台一样，好像是更高维度来控制电脑（所以我贼喜欢 canva 和 heptabase 、affine 类）；我的生活又已经和本地 Agent 融在一起，Obsidian 是我最常用的软件之一。所以我想，可以做 Canvas Playback。和我预料得差不多，它很优雅。
 
-## Why I Built It
-
 At work, I often need to play many PowerPoint-like files on a TV, one after another: different formats, different sources. Switching between apps is painful. Playing directly with Apple's Preview is often uncontrollable; sometimes it is not fullscreen, sometimes it is incomplete. I really like Feishu's built-in presentation feature, so I often send a dozen files to myself in Feishu, then click through them one by one in the chat. But it makes me look busy and very inelegant!
 
 Then I realized that Canvas is already an excellent presentation console. I can use arrows to point to files and change the playback order at any time. It feels like an observer's console, as if I am controlling the computer from a higher dimension (which is why I love tools like Canva, Heptabase, and Affine so much). My life is already blended with local agents, and Obsidian is one of the apps I use most. So I thought: I can make Canvas Playback. As I expected, it is elegant.
-
-## 最重要的原则
-
-PDF、PPT、Keynote、ODP 这类演示文件必须逐页播放。每一步只显示当前页，不能退回到连续文档视图，不能把前后页混在同一个画面里。这是这个插件的核心，不是一个可选细节。
-
-Slide documents such as PDF, PowerPoint, Keynote, and ODP must play page by page. One step means one page. The player must never fall back to a mixed multi-page document viewer. This is the core invariant, not a detail.
 
 ## 功能
 
@@ -87,24 +71,6 @@ Slide documents such as PDF, PowerPoint, Keynote, and ODP must play page by page
 | Last | `End` |
 | Toggle fullscreen | `F` |
 | Exit fullscreen, then close | `Esc` |
-
-## 演示文件规则
-
-`ppt`、`pptx`、`key`、`odp` 这类文件需要在同一目录放一份同名 PDF。插件会播放那份 PDF，并逐页展开。例如：
-
-```text
-demo.pptx
-demo.pdf
-```
-
-## Slide File Rule
-
-Files such as `ppt`, `pptx`, `key`, and `odp` need a same-name PDF export next to the source file. Canvas Playback plays the PDF page by page. For example:
-
-```text
-demo.pptx
-demo.pdf
-```
 
 ## 媒体支持
 
@@ -163,22 +129,6 @@ The repository keeps Obsidian-loadable release files at the root while moving to
 npm run check
 npm run verify:canvas
 ```
-
-## 展示素材
-
-现在已有一段动图和两张展示图，放在 `docs/assets/`。
-
-- `canvas-playback-demo.gif`
-- `canvas-playback-1.png`
-- `canvas-playback-2.png`
-
-## Showcase Assets
-
-The repository includes one animated demo and two screenshots under `docs/assets/`.
-
-- `canvas-playback-demo.gif`
-- `canvas-playback-1.png`
-- `canvas-playback-2.png`
 
 ## 致谢
 

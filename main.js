@@ -952,11 +952,6 @@ class CanvasPlayerModal extends Modal {
   }
 
   jumpToOutlineEntry(entry) {
-    const currentEntryIndex = findActiveOutlineEntry(this.outlineEntries, this.index);
-    const currentEntry = this.outlineEntries[currentEntryIndex];
-    if (currentEntry?.key === entry.key && this.index >= entry.startIndex && this.index <= entry.endIndex) {
-      return;
-    }
     this.showIndex(entry.startIndex);
   }
 
