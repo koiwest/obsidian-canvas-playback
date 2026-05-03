@@ -51,6 +51,7 @@ const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "wav", "ogg", "opus", "fl
 const DOCUMENT_EXTENSIONS = new Set(["pdf"]);
 const CONVERTIBLE_EXTENSIONS = new Set(["ppt", "pptx", "pps", "ppsx", "pot", "potx", "key", "odp"]);
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "deck"]);
+const FIGMA_FILE_TYPES = new Set(["design", "board", "proto", "slides", "deck"]);
 const SUPPORTED_FILE_EXTENSIONS = new Set([
   ...IMAGE_EXTENSIONS,
   ...VIDEO_EXTENSIONS,
@@ -342,6 +343,16 @@ async function normalizePlayableNode(app, node) {
   }
 
   if (node.type === "text") {
+    const figma = extractFirstFigmaUrl(node.text);
+    if (figma) {
+      return {
+        type: "figma",
+        title: getFigmaTitleFromUrl(figma.sourceUrl) || getNodeTitle(node),
+        node,
+        url: figma.embedUrl,
+        sourceUrl: figma.sourceUrl,
+      };
+    }
     return {
       type: "text",
       title: getNodeTitle(node),
@@ -353,6 +364,16 @@ async function normalizePlayableNode(app, node) {
   if (node.type === "link") {
     if (!node.url || !/^https?:\/\//i.test(node.url)) {
       return { error: `${getNodeTitle(node)} has an empty or unsupported URL.` };
+    }
+    const figmaUrl = createFigmaEmbedUrl(node.url);
+    if (figmaUrl) {
+      return {
+        type: "figma",
+        title: getFigmaTitleFromUrl(node.url) || getNodeTitle(node),
+        node,
+        url: figmaUrl,
+        sourceUrl: node.url,
+      };
     }
     return {
       type: "url",
@@ -413,6 +434,18 @@ async function normalizePlayableNode(app, node) {
   }
 
   if (MARKDOWN_EXTENSIONS.has(extension)) {
+    const markdown = await app.vault.read(file);
+    const figma = extractFirstFigmaUrl(markdown);
+    if (figma) {
+      return {
+        type: "figma",
+        title: getNodeTitle(node),
+        node,
+        file,
+        url: figma.embedUrl,
+        sourceUrl: figma.sourceUrl,
+      };
+    }
     return { type: "markdown", title: getNodeTitle(node), node, file };
   }
 
@@ -877,10 +910,12 @@ class CanvasPlayerModal extends Modal {
     }
 
     if (item.type === "url") {
-      const iframe = slideEl.createEl("iframe", { attr: { title: item.title, sandbox: "allow-same-origin allow-scripts allow-forms allow-popups" } });
-      const loaded = waitForMediaLoad(iframe);
-      iframe.setAttr("src", item.url);
-      await loaded;
+      await this.renderIframeSlide(slideEl, item, "canvas-player-web-frame");
+      return;
+    }
+
+    if (item.type === "figma") {
+      await this.renderIframeSlide(slideEl, item, "canvas-player-figma-frame");
       return;
     }
 
@@ -925,6 +960,21 @@ class CanvasPlayerModal extends Modal {
       },
     });
     await waitForMediaLoad(audio);
+  }
+
+  async renderIframeSlide(slideEl, item, className) {
+    const iframe = slideEl.createEl("iframe", {
+      cls: className,
+      attr: {
+        title: item.title,
+        sandbox: "allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads",
+        allow: "fullscreen; clipboard-read; clipboard-write; autoplay",
+        allowfullscreen: "true",
+      },
+    });
+    const loaded = waitForMediaLoad(iframe);
+    iframe.setAttr("src", item.url);
+    await loaded;
   }
 
   preloadAround(index) {
@@ -1129,12 +1179,68 @@ function cleanOutlineTitle(title) {
   return cleaned.split(/[\\/]/).filter(Boolean).pop() || cleaned;
 }
 
+function extractFirstFigmaUrl(markdown) {
+  const matches = String(markdown || "").match(/https?:\/\/(?:www\.|embed\.)?figma\.com\/[^\s<>)"']+/gi);
+  if (!matches) return null;
+
+  for (const match of matches) {
+    const sourceUrl = match.replace(/[.,，。!?！？]+$/, "");
+    const embedUrl = createFigmaEmbedUrl(sourceUrl);
+    if (embedUrl) return { sourceUrl, embedUrl };
+  }
+  return null;
+}
+
+function createFigmaEmbedUrl(rawUrl) {
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch (_error) {
+    return null;
+  }
+
+  if (!/(^|\.)figma\.com$/i.test(url.hostname)) return null;
+
+  const parts = url.pathname.split("/").filter(Boolean);
+  const fileType = parts[0];
+  const fileKey = parts[1];
+  if (!FIGMA_FILE_TYPES.has(fileType) || !fileKey) return null;
+
+  const embedUrl = new URL(url.toString());
+  embedUrl.hostname = "embed.figma.com";
+  embedUrl.searchParams.delete("t");
+  if (!embedUrl.searchParams.has("embed-host")) {
+    embedUrl.searchParams.set("embed-host", "canvas-playback");
+  }
+  if (!embedUrl.searchParams.has("footer")) {
+    embedUrl.searchParams.set("footer", "false");
+  }
+  if ((fileType === "slides" || fileType === "deck") && !embedUrl.searchParams.has("viewport-controls")) {
+    embedUrl.searchParams.set("viewport-controls", "true");
+  }
+
+  return embedUrl.toString();
+}
+
+function getFigmaTitleFromUrl(rawUrl) {
+  try {
+    const url = new URL(rawUrl);
+    const parts = url.pathname.split("/").filter(Boolean);
+    const rawTitle = parts[2];
+    if (!rawTitle) return "";
+    return decodeURIComponent(rawTitle).replace(/[-_]+/g, " ").trim();
+  } catch (_error) {
+    return "";
+  }
+}
+
 function getOutlineDetail(item) {
   if (item.type === "pdf-page" && item.pageCount > 1) return `${item.pageCount}p`;
   if (item.type === "pdf-page") return "PDF";
   if (item.type === "image") return "Image";
   if (item.type === "video") return "Video";
   if (item.type === "audio") return "Audio";
+  if (item.type === "figma") return "Figma";
   if (item.type === "markdown") return "MD";
   if (item.type === "url") return "URL";
   if (item.type === "text") return "Text";
