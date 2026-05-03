@@ -20,15 +20,15 @@ Canvas is already a map of thought. Canvas Playback turns that map into a playab
 
 ## 为什么做它
 
-工作的时候，我经常要在投屏电视上连续播放很多个不同格式、不同来源的 PPT 类文件。以前在文件之间切换很难受，直接用预览播放又经常不可控，不一定全屏，也不一定完整。我很喜欢飞书的内置播放，所以常常把文件发给飞书里的自己，再在对话框里依次点击各个文件。能用，但显得我很忙乱。
+工作的时候，我经常要在投屏电视上连续播放很多个不同格式、不同来源的 PPT 类文件。在文件之间切换软件很难受，直接用 Apple 的 preview 播放又经常不可控，有时候不全屏，有时候不完整。我很喜欢飞书的内置放映功能，所以常常把十几个文件发给飞书里的自己，再在对话框里依次点击各个文件。但显得我很忙乱，而且很不优雅！
 
-后来我想到，Canvas 本来就是极好的放映控制台。我可以用箭头随时指向和更改播放顺序；我的生活又已经和本地 Agent 融在一起，而 Obsidian 是我最常用的软件之一。所以我做了 Canvas Playback。和我预料得差不多，它很优雅。
+后来我想到，Canvas 本来就是极好的放映控制台。我可以用箭头随时指向和更改播放顺序，他像一个观察者的控制台一样，好像是更高维度来控制电脑（所以我贼喜欢 canva 和 heptabase 、affine 类）；我的生活又已经和本地 Agent 融在一起，Obsidian 是我最常用的软件之一。所以我想，可以做 Canvas Playback。和我预料得差不多，它很优雅。
 
 ## Why I Built It
 
-At work, I often need to present many PowerPoint-like files on a TV: different formats, different sources, one after another. Switching between them used to feel awful. Playing from preview was unreliable, often not truly fullscreen, and sometimes incomplete. I liked Feishu's built-in file playback, so I would send files to myself in Feishu and click through them one by one in the chat. It worked, but it made me look painfully busy.
+At work, I often need to play many PowerPoint-like files on a TV, one after another: different formats, different sources. Switching between apps is painful. Playing directly with Apple's Preview is often uncontrollable; sometimes it is not fullscreen, sometimes it is incomplete. I really like Feishu's built-in presentation feature, so I often send a dozen files to myself in Feishu, then click through them one by one in the chat. But it makes me look busy and very inelegant!
 
-Then I realized that Canvas is a natural presentation console. I can point arrows at files, reorder the flow anytime, and keep the whole path visible. My daily life is already deeply blended with local agents, and Obsidian is one of the apps I live in. So I built Canvas Playback. It turned out almost exactly as I expected: elegant.
+Then I realized that Canvas is already an excellent presentation console. I can use arrows to point to files and change the playback order at any time. It feels like an observer's console, as if I am controlling the computer from a higher dimension (which is why I love tools like Canva, Heptabase, and Affine so much). My life is already blended with local agents, and Obsidian is one of the apps I use most. So I thought: I can make Canvas Playback. As I expected, it is elegant.
 
 ## 最重要的原则
 
