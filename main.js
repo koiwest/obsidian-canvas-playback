@@ -819,10 +819,12 @@ class CanvasPlayerModal extends Modal {
     this.transitionToken = 0;
     this.outlineOpen = false;
     this.lastFullscreenExitAt = 0;
+    this.focusGuardTimer = null;
     this.keyHandler = (event) => this.handleKey(event);
     this.pointerMoveHandler = (event) => this.handlePointerMove(event);
     this.pointerLeaveHandler = () => this.setOutlineOpen(false);
     this.fullscreenChangeHandler = () => this.handleFullscreenChange();
+    this.focusInHandler = (event) => this.handleFocusIn(event);
   }
 
   onOpen() {
@@ -846,6 +848,7 @@ class CanvasPlayerModal extends Modal {
     this.createOutline();
     window.addEventListener("keydown", this.keyHandler, true);
     window.addEventListener("mousemove", this.pointerMoveHandler, { passive: true });
+    window.addEventListener("focusin", this.focusInHandler, true);
     document.addEventListener("fullscreenchange", this.fullscreenChangeHandler);
     this.stageEl.addEventListener("mouseleave", this.pointerLeaveHandler);
     window.setTimeout(() => {
@@ -858,8 +861,10 @@ class CanvasPlayerModal extends Modal {
   onClose() {
     window.removeEventListener("keydown", this.keyHandler, true);
     window.removeEventListener("mousemove", this.pointerMoveHandler);
+    window.removeEventListener("focusin", this.focusInHandler, true);
     document.removeEventListener("fullscreenchange", this.fullscreenChangeHandler);
     this.stageEl?.removeEventListener("mouseleave", this.pointerLeaveHandler);
+    this.stopFocusGuard();
     if (document.fullscreenElement) {
       document.exitFullscreen().catch(() => {});
     }
@@ -887,6 +892,7 @@ class CanvasPlayerModal extends Modal {
 
     this.trimCache(index);
     this.deferPreloadAround(index);
+    this.syncFocusGuard();
   }
 
   createOutline() {
@@ -954,6 +960,12 @@ class CanvasPlayerModal extends Modal {
     if (!document.fullscreenElement) {
       this.lastFullscreenExitAt = Date.now();
     }
+  }
+
+  handleFocusIn(event) {
+    if (!this.isCurrentItemPresentation()) return;
+    if (event.target?.closest?.(".canvas-player-stage")) return;
+    this.focusStageSoon();
   }
 
   updateOutline() {
@@ -1096,7 +1108,43 @@ class CanvasPlayerModal extends Modal {
     const loaded = waitForMediaLoad(iframe);
     iframe.setAttr("src", item.url);
     await loaded;
-    this.stageEl?.focus({ preventScroll: true });
+    this.focusStageSoon();
+  }
+
+  isCurrentItemPresentation() {
+    return this.items[this.index]?.type === "presentation";
+  }
+
+  syncFocusGuard() {
+    if (this.isCurrentItemPresentation()) {
+      this.startFocusGuard();
+    } else {
+      this.stopFocusGuard();
+    }
+    this.focusStageSoon();
+  }
+
+  startFocusGuard() {
+    if (this.focusGuardTimer) return;
+    this.focusGuardTimer = window.setInterval(() => {
+      if (!this.isCurrentItemPresentation()) {
+        this.stopFocusGuard();
+        return;
+      }
+      if (document.activeElement !== this.stageEl) {
+        this.stageEl?.focus({ preventScroll: true });
+      }
+    }, 180);
+  }
+
+  stopFocusGuard() {
+    if (!this.focusGuardTimer) return;
+    window.clearInterval(this.focusGuardTimer);
+    this.focusGuardTimer = null;
+  }
+
+  focusStageSoon() {
+    window.setTimeout(() => this.stageEl?.focus({ preventScroll: true }), 0);
   }
 
   preloadAround(index) {
