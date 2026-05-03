@@ -26,7 +26,8 @@ Then I realized that Canvas is already an excellent presentation console. I can 
 - 无连接线时，按从左到右、从上到下播放。
 - PDF 逐页展开为独立播放步骤。
 - PPT、PPTX、Keynote、ODP 等演示文件使用同名 PDF 导出逐页播放。
-- 支持图片、视频、音频、Markdown、`.deck`、网页链接、Figma 链接和纯文本节点。
+- 支持图片、视频、音频、Markdown、`.deck`、网页链接、Figma、Gamma、Canva、Google Slides、Prezi 等在线演示链接和纯文本节点。
+- 打开 Canvas 时会提前预加载在线演示链接，减少播放时等待。
 - MP3 等音频文件使用适配主视觉的唱片播放器。
 - 左侧隐藏式 slide index 可快速跳转，并保持当前播放画面的干净。
 - 支持 19 套设计系统。
@@ -37,7 +38,8 @@ Then I realized that Canvas is already an excellent presentation console. I can 
 - Falls back to left-to-right, top-to-bottom order when no edges exist.
 - Expands PDFs into individual page steps.
 - Plays PowerPoint, Keynote, and ODP files through same-name PDF exports.
-- Supports images, videos, audio, Markdown, `.deck`, web links, Figma links, and text nodes.
+- Supports images, videos, audio, Markdown, `.deck`, web links, Figma, Gamma, Canva, Google Slides, Prezi, and other online presentation links.
+- Preloads online presentation links when a Canvas opens, reducing wait time during playback.
 - Renders audio files with a record-style player matched to the visual system.
 - Provides a hidden left-edge slide index for fast navigation without permanent chrome.
 - Includes 19 switchable design systems.
@@ -82,7 +84,7 @@ Then I realized that Canvas is already an excellent presentation console. I can 
 
 笔记与文本：`md`, `markdown`, `deck`
 
-Figma：支持 Canvas 链接节点里的 `figma.com/design`、`figma.com/board`、`figma.com/proto`、`figma.com/slides`、`figma.com/deck`，也支持从 Markdown 笔记和 Canvas 文字卡片中自动识别第一个 Figma 链接。
+在线演示：支持从 Canvas 链接节点、Markdown 笔记和 Canvas 文字卡片中自动识别 Figma、Gamma、Canva、Google Slides、Prezi、Pitch、Tome、Beautiful.ai、Genially 等链接。
 
 ## Media Support
 
@@ -94,7 +96,7 @@ Audio: `mp3`, `m4a`, `aac`, `wav`, `ogg`, `opus`, `flac`
 
 Notes and text: `md`, `markdown`, `deck`
 
-Figma: supports `figma.com/design`, `figma.com/board`, `figma.com/proto`, `figma.com/slides`, and `figma.com/deck` from Canvas link nodes, and automatically detects the first Figma link inside a Markdown note or Canvas text card.
+Online presentations: automatically detects Figma, Gamma, Canva, Google Slides, Prezi, Pitch, Tome, Beautiful.ai, Genially, and similar links from Canvas link nodes, Markdown notes, and Canvas text cards.
 
 ## 安装
 

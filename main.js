@@ -52,6 +52,7 @@ const DOCUMENT_EXTENSIONS = new Set(["pdf"]);
 const CONVERTIBLE_EXTENSIONS = new Set(["ppt", "pptx", "pps", "ppsx", "pot", "potx", "key", "odp"]);
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "deck"]);
 const FIGMA_FILE_TYPES = new Set(["design", "board", "proto", "slides", "deck"]);
+const PRELOAD_PRESENTATION_LIMIT = 12;
 const SUPPORTED_FILE_EXTENSIONS = new Set([
   ...IMAGE_EXTENSIONS,
   ...VIDEO_EXTENSIONS,
@@ -68,6 +69,7 @@ module.exports = class CanvasPlaybackPlugin extends Plugin {
     await this.loadSettings();
     this.pdfRenderer = new PdfBitmapRenderer(this.app, this.manifest);
     this.pdfRenderer.prepare();
+    this.presentationPreloader = new PresentationEmbedPreloader();
     this.addSettingTab(new CanvasPlayerSettingTab(this.app, this));
     this.addCommand({
       id: "play-current-canvas",
@@ -78,10 +80,17 @@ module.exports = class CanvasPlaybackPlugin extends Plugin {
         this.playCurrentCanvas();
       },
     });
+    this.registerEvent(this.app.workspace.on("file-open", (file) => this.scheduleCanvasPresentationPreload(file)));
+    this.registerEvent(this.app.workspace.on("active-leaf-change", () => this.scheduleCanvasPresentationPreload(this.getActiveCanvasFile())));
+    window.setTimeout(() => this.scheduleCanvasPresentationPreload(this.getActiveCanvasFile()), 500);
   }
 
   onunload() {
     this.pdfRenderer?.destroy();
+    this.presentationPreloader?.destroy();
+    if (this.presentationPreloadTimer) {
+      window.clearTimeout(this.presentationPreloadTimer);
+    }
   }
 
   async playCurrentCanvas() {
@@ -141,6 +150,23 @@ module.exports = class CanvasPlaybackPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings);
+  }
+
+  scheduleCanvasPresentationPreload(file) {
+    if (!file || file.extension !== "canvas") return;
+    if (this.presentationPreloadTimer) {
+      window.clearTimeout(this.presentationPreloadTimer);
+    }
+    this.presentationPreloadTimer = window.setTimeout(() => {
+      this.preloadCanvasPresentationLinks(file).catch(() => {});
+    }, 650);
+  }
+
+  async preloadCanvasPresentationLinks(file) {
+    const canvas = await this.readCanvasFile(file);
+    if (!canvas) return;
+    const embeds = await collectPresentationEmbedsFromCanvas(this.app, canvas);
+    this.presentationPreloader?.preload(embeds.map((embed) => embed.url));
   }
 };
 
@@ -280,6 +306,46 @@ async function analyzeCanvas(app, canvas) {
   return { fatal, warnings, playable };
 }
 
+async function collectPresentationEmbedsFromCanvas(app, canvas) {
+  const nodes = Array.isArray(canvas.nodes) ? canvas.nodes : [];
+  const embeds = [];
+  const seen = new Set();
+
+  const addEmbeds = (items) => {
+    for (const item of items) {
+      if (!item || seen.has(item.url)) continue;
+      seen.add(item.url);
+      embeds.push(item);
+      if (embeds.length >= PRELOAD_PRESENTATION_LIMIT) return;
+    }
+  };
+
+  for (const node of nodes) {
+    if (embeds.length >= PRELOAD_PRESENTATION_LIMIT) break;
+
+    if (node.type === "link") {
+      const embed = createPresentationEmbed(node.url);
+      if (embed) addEmbeds([embed]);
+      continue;
+    }
+
+    if (node.type === "text") {
+      addEmbeds(extractPresentationEmbeds(node.text));
+      continue;
+    }
+
+    if (node.type === "file" && MARKDOWN_EXTENSIONS.has(getExtension(node.file))) {
+      const file = app.metadataCache.getFirstLinkpathDest(node.file, "");
+      if (!file) continue;
+      try {
+        addEmbeds(extractPresentationEmbeds(await app.vault.read(file)));
+      } catch (_error) {}
+    }
+  }
+
+  return embeds;
+}
+
 function expandPlayableItem(item) {
   if (item.type !== "pdf") {
     return [item];
@@ -338,14 +404,15 @@ async function normalizePlayableNode(app, node) {
   }
 
   if (node.type === "text") {
-    const figma = extractFirstFigmaUrl(node.text);
-    if (figma) {
+    const presentation = extractFirstPresentationEmbed(node.text);
+    if (presentation) {
       return {
-        type: "figma",
-        title: getFigmaTitleFromUrl(figma.sourceUrl) || getNodeTitle(node),
+        type: "presentation",
+        title: presentation.title || getNodeTitle(node),
         node,
-        url: figma.embedUrl,
-        sourceUrl: figma.sourceUrl,
+        url: presentation.url,
+        sourceUrl: presentation.sourceUrl,
+        provider: presentation.provider,
       };
     }
     return {
@@ -360,14 +427,15 @@ async function normalizePlayableNode(app, node) {
     if (!node.url || !/^https?:\/\//i.test(node.url)) {
       return { error: `${getNodeTitle(node)} has an empty or unsupported URL.` };
     }
-    const figmaUrl = createFigmaEmbedUrl(node.url);
-    if (figmaUrl) {
+    const presentation = createPresentationEmbed(node.url);
+    if (presentation) {
       return {
-        type: "figma",
-        title: getFigmaTitleFromUrl(node.url) || getNodeTitle(node),
+        type: "presentation",
+        title: presentation.title || getNodeTitle(node),
         node,
-        url: figmaUrl,
+        url: presentation.url,
         sourceUrl: node.url,
+        provider: presentation.provider,
       };
     }
     return {
@@ -430,15 +498,16 @@ async function normalizePlayableNode(app, node) {
 
   if (MARKDOWN_EXTENSIONS.has(extension)) {
     const markdown = await app.vault.read(file);
-    const figma = extractFirstFigmaUrl(markdown);
-    if (figma) {
+    const presentation = extractFirstPresentationEmbed(markdown);
+    if (presentation) {
       return {
-        type: "figma",
+        type: "presentation",
         title: getNodeTitle(node),
         node,
         file,
-        url: figma.embedUrl,
-        sourceUrl: figma.sourceUrl,
+        url: presentation.url,
+        sourceUrl: presentation.sourceUrl,
+        provider: presentation.provider,
       };
     }
     return { type: "markdown", title: getNodeTitle(node), node, file };
@@ -689,6 +758,54 @@ class PdfBitmapRenderer {
   }
 }
 
+class PresentationEmbedPreloader {
+  constructor() {
+    this.urls = new Set();
+    this.iframes = new Map();
+    this.container = null;
+  }
+
+  preload(urls) {
+    const nextUrls = urls.filter(Boolean).slice(0, PRELOAD_PRESENTATION_LIMIT);
+    if (nextUrls.length === 0) return;
+    this.ensureContainer();
+
+    for (const url of nextUrls) {
+      if (this.urls.has(url)) continue;
+      this.urls.add(url);
+      const iframe = this.container.createEl("iframe", {
+        attr: {
+          src: url,
+          tabindex: "-1",
+          loading: "eager",
+          sandbox: "allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads",
+          allow: "fullscreen; clipboard-read; clipboard-write; autoplay",
+        },
+      });
+      this.iframes.set(url, iframe);
+    }
+
+    for (const [url, iframe] of this.iframes.entries()) {
+      if (nextUrls.includes(url)) continue;
+      iframe.remove();
+      this.iframes.delete(url);
+      this.urls.delete(url);
+    }
+  }
+
+  ensureContainer() {
+    if (this.container) return;
+    this.container = document.body.createDiv({ cls: "canvas-player-preload-host", attr: { "aria-hidden": "true" } });
+  }
+
+  destroy() {
+    this.iframes.clear();
+    this.urls.clear();
+    this.container?.remove();
+    this.container = null;
+  }
+}
+
 class CanvasPlayerModal extends Modal {
   constructor(app, items, pdfRenderer, settings) {
     super(app);
@@ -909,8 +1026,8 @@ class CanvasPlayerModal extends Modal {
       return;
     }
 
-    if (item.type === "figma") {
-      await this.renderIframeSlide(slideEl, item, "canvas-player-figma-frame");
+    if (item.type === "presentation") {
+      await this.renderIframeSlide(slideEl, item, "canvas-player-presentation-frame");
       return;
     }
 
@@ -958,18 +1075,28 @@ class CanvasPlayerModal extends Modal {
   }
 
   async renderIframeSlide(slideEl, item, className) {
-    const iframe = slideEl.createEl("iframe", {
+    const shell = slideEl.createDiv({
+      cls: `canvas-player-embed-shell ${item.type === "presentation" ? "is-presentation" : "is-web"} ${item.provider ? `is-${item.provider}` : ""}`,
+    });
+    const iframe = shell.createEl("iframe", {
       cls: className,
       attr: {
         title: item.title,
+        tabindex: "-1",
         sandbox: "allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads",
         allow: "fullscreen; clipboard-read; clipboard-write; autoplay",
         allowfullscreen: "true",
       },
     });
+    const shield = shell.createDiv({ cls: "canvas-player-embed-shield", attr: { "aria-hidden": "true" } });
+    shield.addEventListener("pointerdown", (event) => {
+      event.preventDefault();
+      this.stageEl?.focus({ preventScroll: true });
+    });
     const loaded = waitForMediaLoad(iframe);
     iframe.setAttr("src", item.url);
     await loaded;
+    this.stageEl?.focus({ preventScroll: true });
   }
 
   preloadAround(index) {
@@ -1174,19 +1301,27 @@ function cleanOutlineTitle(title) {
   return cleaned.split(/[\\/]/).filter(Boolean).pop() || cleaned;
 }
 
-function extractFirstFigmaUrl(markdown) {
-  const matches = String(markdown || "").match(/https?:\/\/(?:www\.|embed\.)?figma\.com\/[^\s<>)"']+/gi);
-  if (!matches) return null;
-
-  for (const match of matches) {
-    const sourceUrl = match.replace(/[.,，。!?！？]+$/, "");
-    const embedUrl = createFigmaEmbedUrl(sourceUrl);
-    if (embedUrl) return { sourceUrl, embedUrl };
-  }
-  return null;
+function extractFirstPresentationEmbed(markdown) {
+  return extractPresentationEmbeds(markdown)[0] || null;
 }
 
-function createFigmaEmbedUrl(rawUrl) {
+function extractPresentationEmbeds(markdown) {
+  const matches = String(markdown || "").match(/https?:\/\/[^\s<>)"']+/gi);
+  if (!matches) return [];
+
+  const embeds = [];
+  const seen = new Set();
+  for (const match of matches) {
+    const sourceUrl = match.replace(/[.,，。!?！？]+$/, "");
+    const embed = createPresentationEmbed(sourceUrl);
+    if (!embed || seen.has(embed.url)) continue;
+    seen.add(embed.url);
+    embeds.push(embed);
+  }
+  return embeds;
+}
+
+function createPresentationEmbed(rawUrl) {
   let url;
   try {
     url = new URL(rawUrl);
@@ -1194,7 +1329,20 @@ function createFigmaEmbedUrl(rawUrl) {
     return null;
   }
 
-  if (!/(^|\.)figma\.com$/i.test(url.hostname)) return null;
+  if (isHost(url, "figma.com")) return createFigmaPresentationEmbed(url);
+  if (isHost(url, "gamma.app")) return createGammaPresentationEmbed(url);
+  if (isHost(url, "canva.com")) return createCanvaPresentationEmbed(url);
+  if (url.hostname === "docs.google.com" && url.pathname.includes("/presentation/")) return createGoogleSlidesPresentationEmbed(url);
+  if (isHost(url, "prezi.com")) return createPreziPresentationEmbed(url);
+  if (isHost(url, "pitch.com")) return createGenericPresentationEmbed(url, "pitch", "Pitch");
+  if (isHost(url, "tome.app")) return createGenericPresentationEmbed(url, "tome", "Tome");
+  if (isHost(url, "beautiful.ai")) return createGenericPresentationEmbed(url, "beautiful-ai", "Beautiful.ai");
+  if (isHost(url, "genially.com")) return createGenericPresentationEmbed(url, "genially", "Genially");
+  return null;
+}
+
+function createFigmaPresentationEmbed(url) {
+  if (!isHost(url, "figma.com")) return null;
 
   const parts = url.pathname.split("/").filter(Boolean);
   const fileType = parts[0];
@@ -1204,28 +1352,136 @@ function createFigmaEmbedUrl(rawUrl) {
   const embedUrl = new URL(url.toString());
   embedUrl.hostname = "embed.figma.com";
   embedUrl.searchParams.delete("t");
-  if (!embedUrl.searchParams.has("embed-host")) {
-    embedUrl.searchParams.set("embed-host", "canvas-playback");
-  }
-  if (!embedUrl.searchParams.has("footer")) {
-    embedUrl.searchParams.set("footer", "false");
-  }
-  if (!embedUrl.searchParams.has("page-selector")) {
-    embedUrl.searchParams.set("page-selector", "false");
-  }
-  if ((fileType === "slides" || fileType === "deck") && !embedUrl.searchParams.has("viewport-controls")) {
-    embedUrl.searchParams.set("viewport-controls", "true");
-  }
+  embedUrl.searchParams.set("embed-host", "canvas-playback");
+  embedUrl.searchParams.set("footer", "false");
+  embedUrl.searchParams.set("page-selector", "false");
+  embedUrl.searchParams.set("viewport-controls", "false");
 
-  return embedUrl.toString();
+  return {
+    provider: "figma",
+    label: "Figma",
+    title: getPresentationTitleFromUrl(url),
+    sourceUrl: url.toString(),
+    url: embedUrl.toString(),
+  };
 }
 
-function getFigmaTitleFromUrl(rawUrl) {
+function createGammaPresentationEmbed(url) {
+  if (!isHost(url, "gamma.app")) return null;
+
+  const parts = url.pathname.split("/").filter(Boolean);
+  if (parts[0] === "embed" && parts[1]) {
+    return createGenericPresentationEmbed(url, "gamma", "Gamma");
+  }
+
+  const gammaId = extractGammaId(parts);
+  if (!gammaId) return createGenericPresentationEmbed(url, "gamma", "Gamma");
+
+  const embedUrl = new URL(`https://gamma.app/embed/${gammaId}`);
+  return {
+    provider: "gamma",
+    label: "Gamma",
+    title: getPresentationTitleFromUrl(url),
+    sourceUrl: url.toString(),
+    url: embedUrl.toString(),
+  };
+}
+
+function createCanvaPresentationEmbed(url) {
+  if (!isHost(url, "canva.com")) return null;
+
+  const parts = url.pathname.split("/").filter(Boolean);
+  if (parts[0] !== "design" || !parts[1]) return null;
+
+  const embedUrl = new URL(url.toString());
+  embedUrl.hostname = "www.canva.com";
+  const pathParts = embedUrl.pathname.split("/").filter(Boolean);
+  const last = pathParts[pathParts.length - 1];
+  if (last === "present") {
+    pathParts[pathParts.length - 1] = "view";
+  } else if (last !== "view" && last !== "watch") {
+    pathParts.push("view");
+  }
+  embedUrl.pathname = `/${pathParts.join("/")}`;
+  embedUrl.searchParams.set("embed", "");
+
+  return {
+    provider: "canva",
+    label: "Canva",
+    title: getPresentationTitleFromUrl(url),
+    sourceUrl: url.toString(),
+    url: embedUrl.toString(),
+  };
+}
+
+function createGoogleSlidesPresentationEmbed(url) {
+  const idMatch = url.pathname.match(/\/presentation\/d\/([^/]+)/);
+  if (!idMatch) return null;
+
+  const embedUrl = new URL(`https://docs.google.com/presentation/d/${idMatch[1]}/embed`);
+  embedUrl.searchParams.set("start", "false");
+  embedUrl.searchParams.set("loop", "false");
+  embedUrl.searchParams.set("delayms", "3000");
+  embedUrl.searchParams.set("rm", "minimal");
+
+  const slideMatch = url.hash.match(/slide=([^&]+)/);
+  if (slideMatch) embedUrl.searchParams.set("slide", slideMatch[1]);
+
+  return {
+    provider: "google-slides",
+    label: "Google Slides",
+    title: getPresentationTitleFromUrl(url),
+    sourceUrl: url.toString(),
+    url: embedUrl.toString(),
+  };
+}
+
+function createPreziPresentationEmbed(url) {
+  if (!isHost(url, "prezi.com")) return null;
+
+  const parts = url.pathname.split("/").filter(Boolean);
+  let preziId = "";
+  if (parts[0] === "embed" && parts[1]) preziId = parts[1];
+  if (parts[0] === "p" && parts[1] === "embed" && parts[2]) preziId = parts[2];
+  if (parts[0] === "p" && parts[1]) preziId = parts[1];
+  if (!preziId) return null;
+
+  const embedUrl = new URL(`https://prezi.com/p/embed/${preziId}/`);
+  return {
+    provider: "prezi",
+    label: "Prezi",
+    title: getPresentationTitleFromUrl(url),
+    sourceUrl: url.toString(),
+    url: embedUrl.toString(),
+  };
+}
+
+function createGenericPresentationEmbed(url, provider, label) {
+  return {
+    provider,
+    label,
+    title: getPresentationTitleFromUrl(url),
+    sourceUrl: url.toString(),
+    url: url.toString(),
+  };
+}
+
+function extractGammaId(parts) {
+  const last = decodeURIComponent(parts[parts.length - 1] || "");
+  const match = last.match(/([a-z0-9]{8,})$/i);
+  return match ? match[1] : "";
+}
+
+function isHost(url, domain) {
+  return url.hostname === domain || url.hostname.endsWith(`.${domain}`);
+}
+
+function getPresentationTitleFromUrl(rawUrl) {
   try {
-    const url = new URL(rawUrl);
+    const url = rawUrl instanceof URL ? rawUrl : new URL(rawUrl);
     const parts = url.pathname.split("/").filter(Boolean);
-    const rawTitle = parts[2];
-    if (!rawTitle) return "";
+    const rawTitle = [...parts].reverse().find((part) => !/^(view|present|embed|docs|design|slides|deck|proto|board|public)$/i.test(part));
+    if (!rawTitle || /^[a-z0-9_-]{8,}$/i.test(rawTitle)) return "";
     return decodeURIComponent(rawTitle).replace(/[-_]+/g, " ").trim();
   } catch (_error) {
     return "";
@@ -1238,7 +1494,7 @@ function getOutlineDetail(item) {
   if (item.type === "image") return "Image";
   if (item.type === "video") return "Video";
   if (item.type === "audio") return "Audio";
-  if (item.type === "figma") return "Figma";
+  if (item.type === "presentation") return item.provider ? item.provider.replace(/-/g, " ") : "Deck";
   if (item.type === "markdown") return "MD";
   if (item.type === "url") return "URL";
   if (item.type === "text") return "Text";
