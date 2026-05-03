@@ -1,0 +1,9 @@
+{
+  "id": "obsidian-canvas-playback",
+  "name": "Canvas Playback",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "Play connected files from your Obsidian Canvas as a fullscreen presentation.",
+  "author": "Koi-west",
+  "isDesktopOnly": true
+}

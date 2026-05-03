@@ -1,0 +1,24 @@
+{
+  "name": "obsidian-canvas-playback",
+  "version": "0.1.0",
+  "description": "Play connected files from your Obsidian Canvas as a fullscreen presentation.",
+  "main": "main.js",
+  "scripts": {
+    "check": "node --check main.js && node --check design-systems.js && node --check scripts/verify-canvas.js",
+    "build": "npm run check",
+    "verify:canvas": "node scripts/verify-canvas.js /Users/apple/Documents/komorebi '/Users/apple/Documents/komorebi/komorebi · komorebi/Working/Spark Lab/Spark Lab · Community/Community · Residency/SIM Week2.canvas'"
+  },
+  "keywords": [
+    "obsidian",
+    "obsidian-plugin",
+    "canvas",
+    "presentation",
+    "slides",
+    "playback"
+  ],
+  "author": "Koi-west",
+  "license": "MIT",
+  "devDependencies": {
+    "obsidian": "latest"
+  }
+}
