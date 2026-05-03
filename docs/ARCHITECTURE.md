@@ -9,7 +9,7 @@ Slide-like files must play as isolated fullscreen steps. PDF pages are rendered 
 ## Runtime Files
 
 - `main.js` contains the Obsidian plugin runtime.
-- `design-systems.js` owns theme tokens and the design-system registry.
+- `design-systems.js` mirrors theme tokens as a design-system reference. Runtime tokens are currently inlined in `main.js` because Obsidian release plugins are safest when `main.js` is self-contained.
 - `styles.css` owns the stage, slide index, media surfaces, and issue UI.
 - `vendor/pdfjs/` contains the PDF.js module and worker used for single-page bitmap rendering.
 - `scripts/verify-canvas.js` validates a real Canvas path outside Obsidian.
@@ -29,4 +29,4 @@ The left-edge slide index is the reference component for the current visual lang
 
 ## Repository Direction
 
-The next structural step is to move authored source into `src/`, bundle with `esbuild`, and keep `main.js` as a generated release artifact. Until then, root files remain the working Obsidian plugin.
+The next structural step is to move authored source into `src/`, bundle with `esbuild`, and keep `main.js` as a generated release artifact. Until then, root files remain the working Obsidian plugin and `main.js` should not require local runtime modules.
