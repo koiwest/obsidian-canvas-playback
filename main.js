@@ -751,19 +751,27 @@ class CanvasPlayerModal extends Modal {
     panel.createDiv({ cls: "canvas-player-outline-title", text: "Slides" });
     this.outlineProgressEl = panel.createDiv({ cls: "canvas-player-outline-progress" });
     const list = panel.createDiv({ cls: "canvas-player-outline-list" });
-    this.outlineButtons = this.outlineEntries.map((entry) => {
+    this.outlineButtons = this.outlineEntries.map((entry, index) => {
       const button = list.createEl("button", {
         cls: "canvas-player-outline-item",
         attr: { type: "button", "data-start-index": String(entry.startIndex) },
       });
+      button.dataset.entryIndex = String(index);
+      button.dataset.startIndex = String(entry.startIndex);
       button.createSpan({ cls: "canvas-player-outline-item-name", text: entry.title });
       if (entry.detail) {
         button.createSpan({ cls: "canvas-player-outline-item-detail", text: entry.detail });
       }
+      button.addEventListener("pointerdown", (event) => this.handleOutlineJumpEvent(event));
+      button.addEventListener("mousedown", (event) => this.handleOutlineJumpEvent(event));
+      button.addEventListener("click", (event) => this.handleOutlineJumpEvent(event));
+      button.addEventListener("touchstart", (event) => this.handleOutlineJumpEvent(event), { passive: false });
       return button;
     });
     list.addEventListener("pointerdown", (event) => this.handleOutlineJumpEvent(event), true);
+    list.addEventListener("mousedown", (event) => this.handleOutlineJumpEvent(event), true);
     list.addEventListener("click", (event) => this.handleOutlineJumpEvent(event), true);
+    list.addEventListener("touchstart", (event) => this.handleOutlineJumpEvent(event), { capture: true, passive: false });
     this.outlineEl.addEventListener("mouseenter", () => this.setOutlineOpen(true));
     this.outlineEl.addEventListener("mouseleave", (event) => {
       if (event.clientX > 310) this.setOutlineOpen(false);
@@ -960,10 +968,13 @@ class CanvasPlayerModal extends Modal {
     event.stopPropagation();
     event.stopImmediatePropagation?.();
 
-    const startIndex = Number(button.dataset.startIndex);
-    if (Number.isInteger(startIndex)) {
-      this.showIndex(startIndex);
-    }
+    const entryIndex = Number(button.dataset.entryIndex);
+    const fallbackIndex = this.outlineButtons ? this.outlineButtons.indexOf(button) : -1;
+    const entry = this.outlineEntries[entryIndex] || this.outlineEntries[fallbackIndex];
+    if (!entry) return;
+
+    this.setOutlineOpen(true);
+    this.showIndex(entry.startIndex);
   }
 
   scheduleDeckWarmup() {
