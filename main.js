@@ -255,23 +255,11 @@ async function analyzeCanvas(app, canvas) {
       ? "Canvas has no connections. Nodes will play from left to right, then top to bottom."
       : "Canvas has no usable connections. Nodes will play from left to right, then top to bottom.");
   } else {
-    const starts = nodes.filter((node) => incoming.get(node.id) === 0 && adjacency.get(node.id).length > 0);
-    if (starts.length === 0) {
+    const start = findPlaybackStart(nodes, adjacency, incoming);
+    if (!start) {
       fatal.push("Could not find a start node. Add a node with no incoming edge and at least one outgoing edge.");
-    } else if (starts.length > 1) {
-      fatal.push(`Multiple start nodes found: ${starts.map(getNodeTitle).join(", ")}.`);
     } else {
-      orderedNodes = walkSingleChain(starts[0], adjacency, nodeById, fatal, warnings);
-      const linkedIds = new Set();
-      for (const edge of validEdges) {
-        linkedIds.add(edge.fromNode);
-        linkedIds.add(edge.toNode);
-      }
-      const visitedIds = new Set(orderedNodes.map((node) => node.id));
-      const missingFromChain = [...linkedIds].filter((id) => !visitedIds.has(id));
-      if (missingFromChain.length > 0) {
-        fatal.push(`Disconnected chain segment found: ${missingFromChain.map((id) => getNodeTitle(nodeById.get(id))).join(", ")}.`);
-      }
+      orderedNodes = walkSingleChain(start, adjacency, nodeById, fatal, warnings);
     }
   }
 
@@ -312,6 +300,13 @@ function compareCanvasPosition(a, b) {
 
 function numberOrZero(value) {
   return Number.isFinite(value) ? value : 0;
+}
+
+function findPlaybackStart(nodes, adjacency, incoming) {
+  const starts = nodes
+    .filter((node) => incoming.get(node.id) === 0 && adjacency.get(node.id).length > 0)
+    .sort(compareCanvasPosition);
+  return starts[0] || null;
 }
 
 function walkSingleChain(start, adjacency, nodeById, fatal, warnings) {
@@ -1214,6 +1209,9 @@ function createFigmaEmbedUrl(rawUrl) {
   }
   if (!embedUrl.searchParams.has("footer")) {
     embedUrl.searchParams.set("footer", "false");
+  }
+  if (!embedUrl.searchParams.has("page-selector")) {
+    embedUrl.searchParams.set("page-selector", "false");
   }
   if ((fileType === "slides" || fileType === "deck") && !embedUrl.searchParams.has("viewport-controls")) {
     embedUrl.searchParams.set("viewport-controls", "true");

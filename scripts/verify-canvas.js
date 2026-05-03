@@ -70,9 +70,11 @@ if (warnings.length > 0) {
 console.log("next-chain: ok");
 
 function getSingleChain() {
-  const starts = nodes.filter((node) => incoming.get(node.id) === 0 && adjacency.get(node.id).length > 0);
-  if (starts.length !== 1) {
-    console.error(`Expected exactly one start node, found ${starts.length}.`);
+  const starts = nodes
+    .filter((node) => incoming.get(node.id) === 0 && adjacency.get(node.id).length > 0)
+    .sort(compareCanvasPosition);
+  if (starts.length === 0) {
+    console.error("Expected at least one start node.");
     process.exit(1);
   }
 

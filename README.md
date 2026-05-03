@@ -22,7 +22,7 @@ Then I realized that Canvas is already an excellent presentation console. I can 
 
 ## 功能
 
-- 按 Canvas 连接线决定播放顺序。
+- 按 Canvas 连接线决定播放顺序；有多条连接链时，从最左上方的火车头节点开始，只播放这一条链。
 - 无连接线时，按从左到右、从上到下播放。
 - PDF 逐页展开为独立播放步骤。
 - PPT、PPTX、Keynote、ODP 等演示文件使用同名 PDF 导出逐页播放。
@@ -33,7 +33,7 @@ Then I realized that Canvas is already an excellent presentation console. I can 
 
 ## Features
 
-- Uses Canvas edges as the playback order.
+- Uses Canvas edges as the playback order; when multiple chains exist, playback starts from the top-left train-head node and only follows that chain.
 - Falls back to left-to-right, top-to-bottom order when no edges exist.
 - Expands PDFs into individual page steps.
 - Plays PowerPoint, Keynote, and ODP files through same-name PDF exports.
