@@ -6,17 +6,29 @@ Play connected PDFs, slide decks, videos, images, web pages, and notes from your
 
 **Connect files. Play the flow.**
 
-![Canvas Playback demo](docs/assets/canvas-playback-demo.gif)
-
 ![Canvas Playback canvas path](docs/assets/canvas-playback-1.png)
 
 ![Canvas Playback fullscreen player](docs/assets/canvas-playback-2.png)
+
+![Canvas Playback demo](docs/assets/canvas-playback-demo.gif)
 
 ## 它解决什么
 
 Canvas 本来就是思路的地图。Canvas Playback 做的事很简单：把这张地图变成一条可播放的路径。你把文件放进 Canvas，用线连接顺序，然后按下播放。每一个节点都成为一个全屏片段。
 
 Canvas is already a map of thought. Canvas Playback turns that map into a playable path. Drop files into a Canvas, connect them in order, then play. Each node becomes a fullscreen step.
+
+## 为什么做它
+
+工作的时候，我经常要在投屏电视上连续播放很多个不同格式、不同来源的 PPT 类文件。以前在文件之间切换很难受，直接用预览播放又经常不可控，不一定全屏，也不一定完整。我很喜欢飞书的内置播放，所以常常把文件发给飞书里的自己，再在对话框里依次点击各个文件。能用，但显得我很忙乱。
+
+后来我想到，Canvas 本来就是极好的放映控制台。我可以用箭头随时指向和更改播放顺序；我的生活又已经和本地 Agent 融在一起，而 Obsidian 是我最常用的软件之一。所以我做了 Canvas Playback。和我预料得差不多，它很优雅。
+
+## Why I Built It
+
+At work, I often need to present many PowerPoint-like files on a TV: different formats, different sources, one after another. Switching between them used to feel awful. Playing from preview was unreliable, often not truly fullscreen, and sometimes incomplete. I liked Feishu's built-in file playback, so I would send files to myself in Feishu and click through them one by one in the chat. It worked, but it made me look painfully busy.
+
+Then I realized that Canvas is a natural presentation console. I can point arrows at files, reorder the flow anytime, and keep the whole path visible. My daily life is already deeply blended with local agents, and Obsidian is one of the apps I live in. So I built Canvas Playback. It turned out almost exactly as I expected: elegant.
 
 ## 最重要的原则
 
@@ -167,6 +179,18 @@ The repository includes one animated demo and two screenshots under `docs/assets
 - `canvas-playback-demo.gif`
 - `canvas-playback-1.png`
 - `canvas-playback-2.png`
+
+## 致谢
+
+- [typeUI](https://github.com/bergside/typeui)：我用 slock 很爽的时候，也发现了这个好看的 Design Skill。
+- Codex 5.5：虽然很快，20 分钟就把我的额度烧完了，但它真的很强。尤其是在我 Claude Code 周额度用完的时候，很感谢。
+- Obsidian & Logseq：很喜欢。
+
+## Thanks
+
+- [typeUI](https://github.com/bergside/typeui): I found this beautiful Design Skill while happily using slock.
+- Codex 5.5: It burned through my quota in about 20 minutes, but it is genuinely strong. I am especially grateful when my Claude Code weekly quota is gone.
+- Obsidian & Logseq: I love them.
 
 ## License
 
