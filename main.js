@@ -5,6 +5,7 @@ const { pathToFileURL } = require("url");
 
 const DEFAULT_SETTINGS = {
   designSystem: "neobrutalism",
+  figmaAccessToken: "",
 };
 
 const DESIGN_SYSTEMS = [
@@ -106,7 +107,7 @@ module.exports = class CanvasPlaybackPlugin extends Plugin {
       return;
     }
 
-    const analysis = await analyzeCanvas(this.app, canvas);
+    const analysis = await analyzeCanvas(this.app, canvas, this.settings);
     if (analysis.fatal.length > 0) {
       exitFullscreenIfActive();
     }
@@ -246,10 +247,24 @@ class CanvasPlayerSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings();
           });
       });
+
+    new Setting(containerEl)
+      .setName("Figma access token")
+      .setDesc("Optional. Enables Canvas Playback to expand Figma Slides into individual high-resolution steps controlled by Canvas Playback shortcuts.")
+      .addText((text) => {
+        text.inputEl.type = "password";
+        text
+          .setPlaceholder("figd_...")
+          .setValue(this.plugin.settings.figmaAccessToken || "")
+          .onChange(async (value) => {
+            this.plugin.settings.figmaAccessToken = value.trim();
+            await this.plugin.saveSettings();
+          });
+      });
   }
 }
 
-async function analyzeCanvas(app, canvas) {
+async function analyzeCanvas(app, canvas, settings = DEFAULT_SETTINGS) {
   const nodes = Array.isArray(canvas.nodes) ? canvas.nodes : [];
   const edges = Array.isArray(canvas.edges) ? canvas.edges : [];
   const fatal = [];
@@ -291,7 +306,7 @@ async function analyzeCanvas(app, canvas) {
 
   const playable = [];
   for (const node of orderedNodes) {
-    const item = await normalizePlayableNode(app, node);
+    const item = await normalizePlayableNode(app, node, settings);
     if (item.error) {
       warnings.push(item.error);
       continue;
@@ -347,6 +362,10 @@ async function collectPresentationEmbedsFromCanvas(app, canvas) {
 }
 
 function expandPlayableItem(item) {
+  if (Array.isArray(item.steps)) {
+    return item.steps;
+  }
+
   if (item.type !== "pdf") {
     return [item];
   }
@@ -398,7 +417,7 @@ function walkSingleChain(start, adjacency, nodeById, fatal, warnings) {
   return ordered;
 }
 
-async function normalizePlayableNode(app, node) {
+async function normalizePlayableNode(app, node, settings = DEFAULT_SETTINGS) {
   if (hasDirective(node, "SKIP") || hasDirective(node, "BACKUP")) {
     return { error: `${getNodeTitle(node)} is marked ${hasDirective(node, "SKIP") ? "SKIP" : "BACKUP"} and will be skipped.` };
   }
@@ -406,7 +425,7 @@ async function normalizePlayableNode(app, node) {
   if (node.type === "text") {
     const presentation = extractFirstPresentationEmbed(node.text);
     if (presentation) {
-      return {
+      return await normalizePresentationItem(presentation, node, settings) || {
         type: "presentation",
         title: presentation.title || getNodeTitle(node),
         node,
@@ -429,7 +448,7 @@ async function normalizePlayableNode(app, node) {
     }
     const presentation = createPresentationEmbed(node.url);
     if (presentation) {
-      return {
+      return await normalizePresentationItem(presentation, node, settings) || {
         type: "presentation",
         title: presentation.title || getNodeTitle(node),
         node,
@@ -500,7 +519,7 @@ async function normalizePlayableNode(app, node) {
     const markdown = await app.vault.read(file);
     const presentation = extractFirstPresentationEmbed(markdown);
     if (presentation) {
-      return {
+      return await normalizePresentationItem(presentation, node, settings) || {
         type: "presentation",
         title: getNodeTitle(node),
         node,
@@ -514,6 +533,21 @@ async function normalizePlayableNode(app, node) {
   }
 
   return { error: `${node.file} could not be normalized.` };
+}
+
+async function normalizePresentationItem(presentation, node, settings) {
+  if (presentation.provider !== "figma") return null;
+
+  const figmaSteps = await createFigmaSlideSteps(presentation, node, settings?.figmaAccessToken);
+  if (figmaSteps.length === 0) return null;
+
+  return {
+    type: "group",
+    title: presentation.title || getNodeTitle(node),
+    node,
+    provider: "figma",
+    steps: figmaSteps,
+  };
 }
 
 async function countPdfPages(app, file) {
@@ -970,7 +1004,7 @@ class CanvasPlayerModal extends Modal {
 
   updateOutline() {
     const item = this.items[this.index];
-    const pageText = item.type === "pdf-page" && item.pageCount > 1 ? ` · page ${item.page}/${item.pageCount}` : "";
+    const pageText = item.pageCount > 1 ? ` · page ${item.page}/${item.pageCount}` : "";
     this.outlineProgressEl?.setText(`${this.index + 1} / ${this.items.length}${pageText}`);
 
     const activeEntryIndex = findActiveOutlineEntry(this.outlineEntries, this.index);
@@ -1015,6 +1049,11 @@ class CanvasPlayerModal extends Modal {
         img.remove();
         renderSlideError(slideEl, `Could not load image: ${item.title}`);
       }
+      return;
+    }
+
+    if (item.type === "remote-image") {
+      await this.renderRemoteImageSlide(slideEl, item);
       return;
     }
 
@@ -1439,7 +1478,132 @@ function createFigmaPresentationEmbed(url) {
     title: getPresentationTitleFromUrl(url),
     sourceUrl: url.toString(),
     url: embedUrl.toString(),
+    fileKey,
+    nodeId: normalizeFigmaNodeId(url.searchParams.get("node-id") || ""),
   };
+}
+
+async function createFigmaSlideSteps(presentation, node, token) {
+  if (!presentation.fileKey || !token) return [];
+
+  try {
+    const file = await requestFigmaApiJson(`https://api.figma.com/v1/files/${encodeURIComponent(presentation.fileKey)}`, token);
+    const slideNodes = findFigmaSlideNodes(file.document);
+    if (slideNodes.length === 0) return [];
+
+    const imageUrls = await requestFigmaImageUrls(presentation.fileKey, slideNodes.map((slide) => slide.id), token);
+    const title = presentation.title || file.name || getNodeTitle(node);
+    const steps = [];
+
+    slideNodes.forEach((slide, index) => {
+      const url = imageUrls[slide.id];
+      if (!url) return;
+      steps.push({
+        type: "remote-image",
+        title,
+        node,
+        url,
+        sourceUrl: createFigmaNodeUrl(presentation.sourceUrl, slide.id),
+        provider: "figma",
+        page: index + 1,
+        pageCount: slideNodes.length,
+      });
+    });
+
+    return steps;
+  } catch (_error) {
+    return [];
+  }
+}
+
+async function requestFigmaApiJson(url, token) {
+  const response = await requestUrl({
+    url,
+    method: "GET",
+    headers: {
+      "X-Figma-Token": token,
+    },
+  });
+  return response.json || JSON.parse(response.text);
+}
+
+async function requestFigmaImageUrls(fileKey, nodeIds, token) {
+  const results = {};
+  const batchSize = 40;
+
+  for (let start = 0; start < nodeIds.length; start += batchSize) {
+    const batch = nodeIds.slice(start, start + batchSize);
+    const url = new URL(`https://api.figma.com/v1/images/${encodeURIComponent(fileKey)}`);
+    url.searchParams.set("ids", batch.join(","));
+    url.searchParams.set("format", "png");
+    url.searchParams.set("scale", "2");
+
+    const data = await requestFigmaApiJson(url.toString(), token);
+    Object.assign(results, data.images || {});
+  }
+
+  return results;
+}
+
+function findFigmaSlideNodes(documentNode) {
+  const pages = Array.isArray(documentNode?.children) ? documentNode.children : [];
+  const direct = [];
+
+  for (const page of pages) {
+    for (const child of page.children || []) {
+      if (isFigmaSlideNode(child)) direct.push(child);
+    }
+  }
+
+  if (direct.length > 0) return sortFigmaSlideNodes(direct);
+
+  const found = [];
+  const visit = (node) => {
+    if (!node || node === documentNode) return;
+    if (isFigmaSlideNode(node)) {
+      found.push(node);
+      return;
+    }
+    for (const child of node.children || []) visit(child);
+  };
+  for (const page of pages) visit(page);
+
+  return sortFigmaSlideNodes(found);
+}
+
+function isFigmaSlideNode(node) {
+  const box = node?.absoluteBoundingBox || node?.absoluteRenderBounds;
+  if (!box || !Number.isFinite(box.width) || !Number.isFinite(box.height) || box.width <= 0 || box.height <= 0) {
+    return false;
+  }
+
+  const aspect = box.width / box.height;
+  const isSlideType = node.type === "SLIDE" || node.type === "FRAME";
+  return isSlideType && box.width >= 600 && box.height >= 300 && Math.abs(aspect - (16 / 9)) < 0.08;
+}
+
+function sortFigmaSlideNodes(nodes) {
+  return [...nodes].sort((a, b) => {
+    const aBox = a.absoluteBoundingBox || a.absoluteRenderBounds || {};
+    const bBox = b.absoluteBoundingBox || b.absoluteRenderBounds || {};
+    return (numberOrZero(aBox.y) - numberOrZero(bBox.y))
+      || (numberOrZero(aBox.x) - numberOrZero(bBox.x))
+      || String(a.name || "").localeCompare(String(b.name || ""));
+  });
+}
+
+function createFigmaNodeUrl(sourceUrl, nodeId) {
+  try {
+    const url = new URL(sourceUrl);
+    url.searchParams.set("node-id", nodeId.replace(":", "-"));
+    return url.toString();
+  } catch (_error) {
+    return sourceUrl;
+  }
+}
+
+function normalizeFigmaNodeId(nodeId) {
+  return String(nodeId || "").replace("-", ":");
 }
 
 async function getFigmaSlidePreview(sourceUrl) {
@@ -1469,7 +1633,7 @@ function upscaleFigmaThumbnailUrl(rawUrl) {
   try {
     const url = new URL(rawUrl);
     if (url.searchParams.has("height")) {
-      url.searchParams.set("height", "1080");
+      url.searchParams.set("height", "1280");
     }
     return url.toString();
   } catch (_error) {
@@ -1602,6 +1766,8 @@ function getPresentationTitleFromUrl(rawUrl) {
 function getOutlineDetail(item) {
   if (item.type === "pdf-page" && item.pageCount > 1) return `${item.pageCount}p`;
   if (item.type === "pdf-page") return "PDF";
+  if (item.type === "remote-image" && item.pageCount > 1) return `${item.pageCount}p`;
+  if (item.type === "remote-image") return "Image";
   if (item.type === "image") return "Image";
   if (item.type === "video") return "Video";
   if (item.type === "audio") return "Audio";

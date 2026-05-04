@@ -28,6 +28,7 @@ Then I realized that Canvas is already an excellent presentation console. I can 
 - PPT、PPTX、Keynote、ODP 等演示文件使用同名 PDF 导出逐页播放。
 - 支持图片、视频、音频、Markdown、`.deck`、网页链接、Figma、Gamma、Canva、Google Slides、Prezi 等在线演示链接和纯文本节点。
 - 打开 Canvas 时会提前预加载在线演示链接，减少播放时等待。
+- 配置 Figma access token 后，Figma Slides 会展开为逐页高清图片，按键行为和 PDF 一致。
 - MP3 等音频文件使用适配主视觉的唱片播放器。
 - 左侧隐藏式 slide index 可快速跳转，并保持当前播放画面的干净。
 - 支持 19 套设计系统。
@@ -40,6 +41,7 @@ Then I realized that Canvas is already an excellent presentation console. I can 
 - Plays PowerPoint, Keynote, and ODP files through same-name PDF exports.
 - Supports images, videos, audio, Markdown, `.deck`, web links, Figma, Gamma, Canva, Google Slides, Prezi, and other online presentation links.
 - Preloads online presentation links when a Canvas opens, reducing wait time during playback.
+- With a Figma access token configured, Figma Slides expand into high-resolution page steps controlled like PDFs.
 - Renders audio files with a record-style player matched to the visual system.
 - Provides a hidden left-edge slide index for fast navigation without permanent chrome.
 - Includes 19 switchable design systems.
@@ -86,6 +88,8 @@ Then I realized that Canvas is already an excellent presentation console. I can 
 
 在线演示：支持从 Canvas 链接节点、Markdown 笔记和 Canvas 文字卡片中自动识别 Figma、Gamma、Canva、Google Slides、Prezi、Pitch、Tome、Beautiful.ai、Genially 等链接。
 
+Figma Slides：未配置 token 时，公开链接会播放当前 `node-id` 的高清预览图。配置 token 后，会通过 Figma REST API 读取文件结构并批量导出每一页，Canvas Playback 的空格和方向键会逐页切换。
+
 ## Media Support
 
 Images: `png`, `jpg`, `jpeg`, `webp`, `gif`, `svg`, `avif`, `bmp`
@@ -97,6 +101,8 @@ Audio: `mp3`, `m4a`, `aac`, `wav`, `ogg`, `opus`, `flac`
 Notes and text: `md`, `markdown`, `deck`
 
 Online presentations: automatically detects Figma, Gamma, Canva, Google Slides, Prezi, Pitch, Tome, Beautiful.ai, Genially, and similar links from Canvas link nodes, Markdown notes, and Canvas text cards.
+
+Figma Slides: without a token, public links play the current `node-id` as a high-resolution preview image. With a token configured, Canvas Playback reads the file through the Figma REST API and exports every slide as a page step controlled by Space and arrow keys.
 
 ## 安装
 
