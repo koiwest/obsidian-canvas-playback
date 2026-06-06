@@ -25,10 +25,11 @@ Then I realized that Canvas is already an excellent presentation console. I can 
 - 按 Canvas 连接线决定播放顺序；有多条连接链时，从最左上方的火车头节点开始，只播放这一条链。
 - 无连接线时，按从左到右、从上到下播放。
 - PDF 逐页展开为独立播放步骤。
-- PPT、PPTX、Keynote、ODP 等演示文件使用同名 PDF 导出逐页播放。
+- PPT、PPTX、PPS、POT 等 PowerPoint 文件会在插件内直接解析并逐页渲染，按键行为和 PDF 一致；PPTX 内部 slide 跳转会映射到对应播放步骤，嵌入的视频/音频会作为可播放媒体层叠在 slide 上。`.key` 文件会在插件内解析并按页播放；当前先使用包内嵌的 slide thumbnails。ODP 仍会走 PDF 链路。
 - 支持图片、视频、音频、Markdown、`.deck`、网页链接、Figma、Gamma、Canva、Google Slides、Prezi 等在线演示链接和纯文本节点。
-- 打开 Canvas 时会提前预加载在线演示链接，减少播放时等待。
-- 配置 Figma access token 后，Figma Slides 会展开为逐页高清图片，按键行为和 PDF 一致。
+- 打开 Canvas 时会扫描主播放链，并提前缓存前 N 页 Figma Slides PNG，减少播放时等待。
+- 配置 Figma access token 后，Figma Slides 会展开为逐页本地高清 PNG，按键行为和 PDF 一致。
+- 未配置 token、token 无权限，或 Figma REST 无法读取该 Slides 结构时，Figma 会降级为 Live Embed Mode，并明确提示这不是像素级完美播放模式。
 - MP3 等音频文件使用适配主视觉的唱片播放器。
 - 左侧隐藏式 slide index 可快速跳转，并保持当前播放画面的干净。
 - 支持 19 套设计系统。
@@ -38,10 +39,11 @@ Then I realized that Canvas is already an excellent presentation console. I can 
 - Uses Canvas edges as the playback order; when multiple chains exist, playback starts from the top-left train-head node and only follows that chain.
 - Falls back to left-to-right, top-to-bottom order when no edges exist.
 - Expands PDFs into individual page steps.
-- Plays PowerPoint, Keynote, and ODP files through same-name PDF exports.
+- Renders PowerPoint decks inside Canvas Playback itself instead of handing them off to another app. PowerPoint slides expand into page steps like PDFs, internal slide jumps map to the matching playback step, and embedded video/audio is overlaid as playable media. `.key` files are parsed inside the plugin and currently play through embedded slide thumbnails; ODP sources still resolve through PDFs.
 - Supports images, videos, audio, Markdown, `.deck`, web links, Figma, Gamma, Canva, Google Slides, Prezi, and other online presentation links.
-- Preloads online presentation links when a Canvas opens, reducing wait time during playback.
-- With a Figma access token configured, Figma Slides expand into high-resolution page steps controlled like PDFs.
+- Scans the main playback chain when a Canvas opens and preloads the first N Figma Slides PNGs into the local cache.
+- With a Figma access token configured, Figma Slides expand into local high-resolution PNG page steps controlled like PDFs.
+- Without a token, permission, or a REST-readable Slides structure, Figma falls back to Live Embed Mode with an explicit non-pixel-perfect playback warning.
 - Renders audio files with a record-style player matched to the visual system.
 - Provides a hidden left-edge slide index for fast navigation without permanent chrome.
 - Includes 19 switchable design systems.
@@ -88,7 +90,9 @@ Then I realized that Canvas is already an excellent presentation console. I can 
 
 在线演示：支持从 Canvas 链接节点、Markdown 笔记和 Canvas 文字卡片中自动识别 Figma、Gamma、Canva、Google Slides、Prezi、Pitch、Tome、Beautiful.ai、Genially 等链接。
 
-Figma Slides：未配置 token 时，公开链接会播放当前 `node-id` 的高清预览图。配置 token 后，会通过 Figma REST API 读取文件结构并批量导出每一页，Canvas Playback 的空格和方向键会逐页切换。
+Keynote：`.key` 文件会在插件内直接解析。当前版本先使用包内嵌的每页缩略图进行内部逐页播放，不走 Keynote 外部放映，也不走 PDF 导出链路。
+
+Figma Slides：配置 token 后，会通过 Figma REST API 读取文件结构，按文档树顺序寻找 `SLIDE` 节点，批量导出为本地缓存的高清 PNG，并由 Canvas Playback 自己逐页播放。缓存路径会使用 Figma `version` / `lastModified` 指纹；文件变化后会自动进入新的缓存目录。未配置 token、token 无权限，或 Figma REST 无法读取该 Slides 结构时，会降级为 Live Embed Mode，并提示这不是像素级完美播放模式。
 
 ## Media Support
 
@@ -102,7 +106,9 @@ Notes and text: `md`, `markdown`, `deck`
 
 Online presentations: automatically detects Figma, Gamma, Canva, Google Slides, Prezi, Pitch, Tome, Beautiful.ai, Genially, and similar links from Canvas link nodes, Markdown notes, and Canvas text cards.
 
-Figma Slides: without a token, public links play the current `node-id` as a high-resolution preview image. With a token configured, Canvas Playback reads the file through the Figma REST API and exports every slide as a page step controlled by Space and arrow keys.
+Keynote: `.key` files are parsed directly inside the plugin. The current version plays the embedded per-slide thumbnails inside Canvas Playback itself, without switching to external Keynote or exporting through PDF.
+
+Figma Slides: with a token configured, Canvas Playback reads the file through the Figma REST API, finds `SLIDE` nodes in document-tree order, exports them into locally cached high-resolution PNGs, and plays them as first-class Canvas Playback steps. Cache directories are fingerprinted with Figma `version` / `lastModified`, so file changes invalidate old renders. Without a token, permission, or a REST-readable Slides structure, Figma falls back to Live Embed Mode with an explicit non-pixel-perfect playback warning.
 
 ## 安装
 

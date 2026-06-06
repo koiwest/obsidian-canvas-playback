@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+const { execFileSync } = require("child_process");
 const fs = require("fs");
 const path = require("path");
 
@@ -7,7 +8,12 @@ const SUPPORTED_IMAGES = new Set(["png", "jpg", "jpeg", "webp", "gif", "svg", "a
 const SUPPORTED_VIDEO = new Set(["mp4", "mov", "m4v", "webm", "ogv", "avi", "mkv"]);
 const SUPPORTED_AUDIO = new Set(["mp3", "m4a", "aac", "wav", "ogg", "opus", "flac"]);
 const SUPPORTED_MARKDOWN = new Set(["md", "markdown", "deck"]);
-const CONVERTIBLE = new Set(["ppt", "pptx", "pps", "ppsx", "pot", "potx", "key", "odp"]);
+const CONVERTIBLE = new Set(["odp"]);
+const KEYNOTE_EXTENSIONS = new Set(["key"]);
+let parseIwa = null;
+try {
+  ({ parseIwa } = require("keynote-parser2/lib/parse/parse-iwa.js"));
+} catch (_error) {}
 
 const [vaultPath, canvasPath] = process.argv.slice(2);
 
@@ -123,6 +129,14 @@ function normalizeNode(node) {
     return { type: "pdf", title: titleOf(node), file: absolutePath, pages: countPdfPages(absolutePath) };
   }
 
+  if (["ppt", "pptx", "pps", "ppsx", "pot", "potx"].includes(extension)) {
+    return { type: "pptx", title: titleOf(node), file: absolutePath, pages: countPptxSlides(absolutePath) };
+  }
+
+  if (KEYNOTE_EXTENSIONS.has(extension)) {
+    return { type: "keynote", title: titleOf(node), file: absolutePath, pages: countKeynoteSlides(absolutePath) };
+  }
+
   if (CONVERTIBLE.has(extension)) {
     const converted = absolutePath.replace(/\.[^.]+$/, ".pdf");
     if (!fs.existsSync(converted)) {
@@ -152,6 +166,18 @@ function normalizeNode(node) {
 
 function expandNode(item) {
   if (item.type !== "pdf") {
+    if (item.type === "pptx") {
+      return Array.from({ length: item.pages }, (_value, pageIndex) => ({
+        index: steps.length + pageIndex,
+        label: `${item.title} slide ${pageIndex + 1}/${item.pages}`,
+      }));
+    }
+    if (item.type === "keynote") {
+      return Array.from({ length: item.pages }, (_value, pageIndex) => ({
+        index: steps.length + pageIndex,
+        label: `${item.title} slide ${pageIndex + 1}/${item.pages}`,
+      }));
+    }
     const index = steps.length;
     return [{ index, label: item.title }];
   }
@@ -190,4 +216,28 @@ function countPdfPages(filePath) {
   const text = fs.readFileSync(filePath).toString("latin1");
   const matches = text.match(/\/Type\s*\/Page\b/g);
   return Math.max(1, matches ? matches.length : 1);
+}
+
+function countPptxSlides(filePath) {
+  const text = fs.readFileSync(filePath).toString("latin1");
+  const matches = text.match(/ppt\/slides\/slide\d+\.xml/g) || [];
+  return Math.max(1, new Set(matches).size);
+}
+
+function countKeynoteSlides(filePath) {
+  if (!parseIwa) return 1;
+  try {
+    const documentIwa = execFileSync("unzip", ["-p", filePath, "Index/Document.iwa"]);
+    const parsed = parseIwa(documentIwa);
+    for (const archive of Object.values(parsed)) {
+      for (const message of archive.messages || []) {
+        if (message.messageProtoName === "KN.ShowArchive") {
+          return Math.max(1, message.message?.slideTree?.slides?.length || 1);
+        }
+      }
+    }
+    return 1;
+  } catch (_error) {
+    return 1;
+  }
 }

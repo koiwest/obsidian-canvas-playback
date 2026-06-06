@@ -1,5 +1,6 @@
 node_modules/
 data.json
+cache/
 .DS_Store
 *.log
 *.map

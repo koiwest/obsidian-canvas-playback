@@ -20,5 +20,9 @@
   "license": "MIT",
   "devDependencies": {
     "obsidian": "latest"
+  },
+  "dependencies": {
+    "@aiden0z/pptx-renderer": "^1.1.0",
+    "keynote-parser2": "^0.7.0"
   }
 }
