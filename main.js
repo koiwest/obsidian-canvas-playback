@@ -92,7 +92,7 @@ module.exports = class CanvasPlaybackPlugin extends Plugin {
     await this.loadSettings();
     this.pdfRenderer = new PdfBitmapRenderer(this.app, this.manifest);
     this.pdfRenderer.prepare();
-    this.pptxRenderer = new PptxDeckRenderer(this.app);
+    this.pptxRenderer = new PptxDeckRenderer(this.app, this.manifest);
     this.nativePresentationController = new NativePresentationController(this.app);
     this.presentationConverter = new PresentationPdfCache(this.app, this.manifest);
     this.keynoteRenderer = new KeynoteDeckRenderer(this.app, this.manifest);
@@ -931,6 +931,37 @@ function resolvePluginDir(app, manifest = {}) {
   throw new Error("Plugin folder was not found.");
 }
 
+function loadPptxRendererModule(app, manifest = {}) {
+  // Bare specifiers like "@aiden0z/pptx-renderer" cannot be resolved by
+  // Electron's renderer require (it searches electron's internal paths, not the
+  // plugin's node_modules), so try that first but fall back to requiring the
+  // package's CommonJS build by absolute path inside the plugin folder.
+  try {
+    return require("@aiden0z/pptx-renderer");
+  } catch (_error) {}
+
+  const pluginDir = resolvePluginDir(app, manifest);
+  const pkgDir = path.join(pluginDir, "node_modules", "@aiden0z", "pptx-renderer");
+  const candidates = [];
+
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(pkgDir, "package.json"), "utf8"));
+    const requireEntry = pkg.exports?.["."]?.require?.default || pkg.main;
+    if (requireEntry) candidates.push(path.join(pkgDir, requireEntry));
+  } catch (_error) {}
+  candidates.push(path.join(pkgDir, "dist", "aiden0z-pptx-renderer.cjs"));
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return require(candidate);
+    }
+  }
+
+  throw new Error(
+    `@aiden0z/pptx-renderer could not be loaded. Run "npm install" in ${pluginDir}.`,
+  );
+}
+
 function findExecutableOnPath(commandNames) {
   const pathEntries = [
     ...String(process.env.PATH || "").split(path.delimiter).filter(Boolean),
@@ -1349,8 +1380,9 @@ const PPTX_BASE_DPI = 96;
 const PPTX_REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
 
 class PptxDeckRenderer {
-  constructor(app) {
+  constructor(app, manifest = {}) {
     this.app = app;
+    this.manifest = manifest;
     this.deckCache = new Map();
     this.slideCountCache = new Map();
     this.rendererModulePromise = null;
@@ -1437,7 +1469,9 @@ class PptxDeckRenderer {
 
   async getRendererModule() {
     if (!this.rendererModulePromise) {
-      this.rendererModulePromise = Promise.resolve().then(() => require("@aiden0z/pptx-renderer"));
+      this.rendererModulePromise = Promise.resolve().then(() =>
+        loadPptxRendererModule(this.app, this.manifest),
+      );
     }
     return this.rendererModulePromise;
   }
