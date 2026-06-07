@@ -63,7 +63,9 @@ const AUDIO_EXTENSIONS = new Set(["mp3", "m4a", "aac", "wav", "ogg", "opus", "fl
 const DOCUMENT_EXTENSIONS = new Set(["pdf"]);
 const CONVERTIBLE_EXTENSIONS = new Set(["odp"]);
 const KEYNOTE_EXTENSIONS = new Set(["key"]);
-const NATIVE_POWERPOINT_EXTENSIONS = new Set(["ppt", "pptx", "pps", "ppsx", "pot", "potx"]);
+const PPTX_POWERPOINT_EXTENSIONS = new Set(["pptx", "ppsx", "potx"]);
+const LEGACY_POWERPOINT_EXTENSIONS = new Set(["ppt", "pps", "pot"]);
+const NATIVE_POWERPOINT_EXTENSIONS = new Set([...PPTX_POWERPOINT_EXTENSIONS, ...LEGACY_POWERPOINT_EXTENSIONS]);
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "deck"]);
 const FIGMA_FILE_TYPES = new Set(["design", "board", "proto", "slides", "deck"]);
 const PRELOAD_PRESENTATION_LIMIT = 12;
@@ -85,6 +87,9 @@ const SUPPORTED_FILE_EXTENSIONS = new Set([
 ]);
 const PRELOAD_ALL_LIMIT = 48;
 const PRELOAD_RADIUS = 4;
+// Longest we keep the outgoing slide on screen while the incoming one renders,
+// before revealing anyway so navigation never feels frozen.
+const MAX_TRANSITION_HOLD_MS = 320;
 const execFileAsync = promisify(execFile);
 
 module.exports = class CanvasPlaybackPlugin extends Plugin {
@@ -664,7 +669,7 @@ async function normalizePlayableNode(app, node, context = DEFAULT_SETTINGS) {
     return { error: `${node.file} could not be found in the vault.` };
   }
 
-  if (NATIVE_POWERPOINT_EXTENSIONS.has(extension)) {
+  if (PPTX_POWERPOINT_EXTENSIONS.has(extension)) {
     if (!runtime?.pptxRenderer) {
       return { error: `${node.file} could not be rendered because the PPTX renderer is unavailable.` };
     }
@@ -691,6 +696,10 @@ async function normalizePlayableNode(app, node, context = DEFAULT_SETTINGS) {
     } catch (error) {
       return { error: error?.message || `${node.file} could not be rendered as PPTX.` };
     }
+  }
+
+  if (LEGACY_POWERPOINT_EXTENSIONS.has(extension)) {
+    return await normalizeLegacyPowerPointItem(app, node, file, runtime);
   }
 
   if (KEYNOTE_EXTENSIONS.has(extension)) {
@@ -723,16 +732,7 @@ async function normalizePlayableNode(app, node, context = DEFAULT_SETTINGS) {
   }
 
   if (CONVERTIBLE_EXTENSIONS.has(extension)) {
-    let converted = null;
-    try {
-      converted = await resolvePresentationPdf(app, file, runtime);
-    } catch (error) {
-      return { error: error?.message || `${node.file} could not be auto-converted.` };
-    }
-    if (!converted) {
-      return { error: `${node.file} could not be converted into a playable PDF.` };
-    }
-    return await normalizePdfItem(app, node, converted, runtime, { sourceFile: file, converted: true });
+    return await normalizeConvertiblePresentationItem(app, node, file, runtime);
   }
 
   if (IMAGE_EXTENSIONS.has(extension)) {
@@ -771,9 +771,54 @@ async function normalizePlayableNode(app, node, context = DEFAULT_SETTINGS) {
   return { error: `${node.file} could not be normalized.` };
 }
 
+async function normalizeLegacyPowerPointItem(app, node, file, runtime) {
+  const converted = await findConvertedPdf(app, file);
+  if (converted) {
+    return await normalizePdfItem(app, node, converted, runtime, { sourceFile: file, converted: true });
+  }
+
+  const extension = String(file.extension || getExtension(file.path)).toLowerCase();
+  if (runtime?.nativePresentationController?.supports(extension)) {
+    return createNativePresentationItem(node, file);
+  }
+
+  return await normalizeConvertiblePresentationItem(app, node, file, runtime);
+}
+
+async function normalizeConvertiblePresentationItem(app, node, file, runtime) {
+  let conversionError = null;
+  try {
+    const converted = await resolvePresentationPdf(app, file, runtime);
+    if (converted) {
+      return await normalizePdfItem(app, node, converted, runtime, { sourceFile: file, converted: true });
+    }
+  } catch (error) {
+    conversionError = error;
+  }
+
+  const extension = String(file.extension || getExtension(file.path)).toLowerCase();
+  if (runtime?.nativePresentationController?.supports(extension)) {
+    return createNativePresentationItem(node, file);
+  }
+
+  if (conversionError) {
+    return { error: conversionError.message || `${node.file} could not be auto-converted.` };
+  }
+  return { error: `${node.file} could not be converted into a playable PDF.` };
+}
+
+function createNativePresentationItem(node, file) {
+  return {
+    type: "native-presentation",
+    title: getNodeTitle(node),
+    node,
+    file,
+  };
+}
+
 async function normalizePdfItem(app, node, file, runtime, options = {}) {
   const title = getNodeTitle(node);
-  const pages = await countPdfPages(app, file);
+  const pages = await countPdfPages(app, file, runtime);
   if (runtime?.pdfRenderer?.createImageSteps) {
     try {
       const steps = await runtime.pdfRenderer.createImageSteps(file, title, node, pages, options);
@@ -830,7 +875,19 @@ async function normalizePresentationItem(presentation, node, context) {
   };
 }
 
-async function countPdfPages(app, file) {
+async function countPdfPages(app, file, runtime) {
+  // pdf.js is authoritative: it parses the page tree (including object streams)
+  // and returns the exact page count. The latin1 regex below is only a fallback
+  // because it over-counts (e.g. annotation dictionaries also carry /Type /Page),
+  // which would create phantom slides that throw "Invalid page request".
+  if (runtime?.pdfRenderer?.getPageCount) {
+    try {
+      return await runtime.pdfRenderer.getPageCount(file);
+    } catch (_error) {
+      // Fall back to the heuristic below when pdf.js cannot load the document.
+    }
+  }
+
   try {
     const buffer = await readBinaryFromSource(app, file);
     const text = new TextDecoder("latin1").decode(buffer);
@@ -1009,6 +1066,32 @@ function getImageMimeType(filePath) {
   return "image/png";
 }
 
+function getVideoMimeType(filePath) {
+  const extension = getExtension(filePath);
+  if (extension === "mp4") return "video/mp4";
+  // QuickTime (.mov) shares the ISO base-media container with MP4. Chromium's
+  // "video/quicktime" path rejects H.264/HEVC streams that its MP4 demuxer plays
+  // happily, so advertise .mov/.m4v as video/mp4 to reuse the working decoder.
+  if (extension === "mov") return "video/mp4";
+  if (extension === "m4v") return "video/mp4";
+  if (extension === "webm") return "video/webm";
+  if (extension === "ogv") return "video/ogg";
+  if (extension === "avi") return "video/x-msvideo";
+  if (extension === "mkv") return "video/x-matroska";
+  return "application/octet-stream";
+}
+
+function getAudioMimeType(filePath) {
+  const extension = getExtension(filePath);
+  if (extension === "mp3") return "audio/mpeg";
+  if (extension === "m4a") return "audio/mp4";
+  if (extension === "aac") return "audio/aac";
+  if (extension === "wav") return "audio/wav";
+  if (extension === "ogg" || extension === "opus") return "audio/ogg";
+  if (extension === "flac") return "audio/flac";
+  return "application/octet-stream";
+}
+
 function getNodeTitle(node) {
   if (!node) return "(missing node)";
   if (node.type === "file") return node.file || node.id;
@@ -1078,6 +1161,8 @@ class PdfBitmapRenderer {
     this.objectUrls = [];
     this.cacheRoot = null;
     this.externalRendererPath = undefined;
+    this.pageRenderPromises = new Map();
+    this.cleanedCacheDirs = new Set();
   }
 
   prepare() {
@@ -1177,6 +1262,23 @@ class PdfBitmapRenderer {
     const targetPath = this.getExternalRenderedPageTargetPath(cacheInfo, page);
     if (this.hasUsableFile(targetPath)) return targetPath;
 
+    // Deduplicate concurrent renders of the same page. Preload, deck warm-up and
+    // the active navigation can all request the same page at once; without this
+    // each would spawn its own pdftoppm process and fight over the cache file.
+    const inflight = this.pageRenderPromises.get(targetPath);
+    if (inflight) return inflight;
+
+    const promise = this.renderExternalPage(cacheInfo, executable, page, targetPath)
+      .finally(() => {
+        this.pageRenderPromises.delete(targetPath);
+      });
+    this.pageRenderPromises.set(targetPath, promise);
+    return promise;
+  }
+
+  async renderExternalPage(cacheInfo, executable, page, targetPath) {
+    if (this.hasUsableFile(targetPath)) return targetPath;
+
     const pageLabel = String(page).padStart(3, "0");
     const tempPrefix = path.join(cacheInfo.cacheDir, `render-${pageLabel}-${Date.now()}`);
     const tempPath = `${tempPrefix}.png`;
@@ -1215,7 +1317,24 @@ class PdfBitmapRenderer {
       .slice(0, 16);
     const cacheDir = path.join(this.getCacheRoot(), `${safeName}-${fingerprint}`);
     fs.mkdirSync(cacheDir, { recursive: true });
+    this.cleanupStaleRenderTemps(cacheDir);
     return { sourcePath, cacheDir };
+  }
+
+  cleanupStaleRenderTemps(cacheDir) {
+    // Interrupted pdftoppm runs (window closed mid-render) leave "render-*.png"
+    // temp files behind. Sweep them once per directory so the cache stays lean.
+    if (this.cleanedCacheDirs.has(cacheDir)) return;
+    this.cleanedCacheDirs.add(cacheDir);
+    try {
+      for (const name of fs.readdirSync(cacheDir)) {
+        if (name.startsWith("render-")) {
+          fs.rmSync(path.join(cacheDir, name), { force: true });
+        }
+      }
+    } catch (_error) {
+      // Cleanup is best-effort.
+    }
   }
 
   getExternalRenderedPageTargetPath(cacheInfo, page) {
@@ -1254,6 +1373,15 @@ class PdfBitmapRenderer {
       this.documentCache.set(cacheKey, this.loadDocument(file));
     }
     return this.documentCache.get(cacheKey);
+  }
+
+  async getPageCount(file) {
+    const pdf = await this.getDocument(file);
+    const count = Number(pdf?.numPages);
+    if (!Number.isInteger(count) || count < 1) {
+      throw new Error("PDF reported an invalid page count.");
+    }
+    return count;
   }
 
   async loadDocument(file) {
@@ -1417,11 +1545,13 @@ class PptxDeckRenderer {
     const buffer = await this.app.vault.readBinary(file);
     const files = await parseZip(buffer, RECOMMENDED_ZIP_LIMITS);
     const presentation = buildPresentation(files);
+    const slides = Array.isArray(presentation?.slides) ? presentation.slides : [];
+    attachPptxMediaEmbedFallbacks(buffer, slides);
     return {
       cacheKey,
       filePath: file.path,
       presentation,
-      slides: Array.isArray(presentation?.slides) ? presentation.slides : [],
+      slides,
     };
   }
 
@@ -1534,9 +1664,7 @@ class PptxDeckRenderer {
       if (!node.isVideo && !node.isAudio) continue;
       if (!node.mediaRId) continue;
 
-      const rel = slide.rels?.get?.(node.mediaRId);
-      if (!rel?.target) continue;
-      const url = this.getPptxMediaUrl(presentation, rel.target);
+      const url = this.resolvePptxMediaUrl(presentation, slide, node.mediaRId);
       if (!url) continue;
 
       let posterUrl;
@@ -1557,6 +1685,24 @@ class PptxDeckRenderer {
       });
     }
     return refs;
+  }
+
+  resolvePptxMediaUrl(presentation, slide, linkRId) {
+    // Try the rId the renderer extracted from <a:videoFile r:link> first, then
+    // fall back to the embedded <p14:media r:embed> rId. PowerPoint stores some
+    // videos with an external/NULL videoFile link while the real bytes live in
+    // the p14 media embed, so the link alone resolves to nothing.
+    const candidates = [linkRId];
+    const embedRId = slide.__mediaEmbeds?.get?.(linkRId);
+    if (embedRId && embedRId !== linkRId) candidates.push(embedRId);
+
+    for (const rId of candidates) {
+      const target = slide.rels?.get?.(rId)?.target;
+      if (!target || target === "NULL") continue;
+      const url = this.getPptxMediaUrl(presentation, target);
+      if (url) return url;
+    }
+    return "";
   }
 
   getPptxMediaUrl(presentation, relTarget) {
@@ -1584,6 +1730,72 @@ class PptxDeckRenderer {
     this.slideCountCache.clear();
     this.rendererModulePromise = null;
   }
+}
+
+function attachPptxMediaEmbedFallbacks(buffer, slides) {
+  if (!Array.isArray(slides) || slides.length === 0) return;
+  try {
+    const zip = new SimpleZipArchive(buffer);
+    const slidePaths = resolveOrderedPptxSlidePaths(zip);
+    slidePaths.forEach((slidePath, index) => {
+      const slide = slides[index];
+      if (!slide || !slidePath || !zip.exists(slidePath)) return;
+      const map = parsePptxMediaEmbedMap(zip.readText(slidePath));
+      if (map.size > 0) slide.__mediaEmbeds = map;
+    });
+  } catch (_error) {
+    // Non-fatal: without the fallback map we simply rely on the renderer's rIds.
+  }
+}
+
+function resolveOrderedPptxSlidePaths(zip) {
+  const presentationXml = zip.exists("ppt/presentation.xml") ? zip.readText("ppt/presentation.xml") : "";
+  const relsXml = zip.exists("ppt/_rels/presentation.xml.rels") ? zip.readText("ppt/_rels/presentation.xml.rels") : "";
+  const relTargets = parseRelationshipTargets(relsXml);
+  const paths = [];
+  for (const match of presentationXml.matchAll(/<p:sldId\b[^>]*\br:id="([^"]+)"/g)) {
+    const target = relTargets.get(match[1]);
+    paths.push(target ? resolveZipRelativePath("ppt", target) : null);
+  }
+  return paths;
+}
+
+function parseRelationshipTargets(relsXml) {
+  const targets = new Map();
+  for (const match of String(relsXml).matchAll(/<Relationship\b[^>]*>/g)) {
+    const tag = match[0];
+    const id = tag.match(/\bId="([^"]+)"/);
+    const target = tag.match(/\bTarget="([^"]+)"/);
+    if (id && target) targets.set(id[1], target[1]);
+  }
+  return targets;
+}
+
+function parsePptxMediaEmbedMap(slideXml) {
+  // For every <p:pic>, map the <a:videoFile|audioFile r:link> rId (what the
+  // renderer reports as mediaRId) to the sibling <p14:media r:embed> rId that
+  // actually points at the embedded media bytes.
+  const map = new Map();
+  const blocks = String(slideXml).split(/<p:pic\b/).slice(1);
+  for (const block of blocks) {
+    const nvPr = block.match(/<p:nvPr\b[^>]*>([\s\S]*?)<\/p:nvPr>/);
+    const scope = nvPr ? nvPr[1] : block;
+    const link = scope.match(/<(?:\w+:)?(?:video|audio)File\b[^>]*\br:link="([^"]+)"/);
+    const embed = scope.match(/<(?:\w+:)?media\b[^>]*\br:embed="([^"]+)"/);
+    if (link && embed) map.set(link[1], embed[1]);
+  }
+  return map;
+}
+
+function resolveZipRelativePath(baseDir, target) {
+  const cleaned = String(target).replace(/^\.\//, "");
+  if (cleaned.startsWith("/")) return cleaned.slice(1);
+  const segments = String(baseDir).split("/").filter(Boolean);
+  for (const part of cleaned.split("/")) {
+    if (part === "..") segments.pop();
+    else if (part && part !== ".") segments.push(part);
+  }
+  return segments.join("/");
 }
 
 function applyPptxBoxStyle(element, box, scale) {
@@ -2265,6 +2477,10 @@ function mimeTypeFromPath(filePath) {
   if (extension === "gif") return "image/gif";
   if (extension === "svg") return "image/svg+xml";
   if (extension === "webp") return "image/webp";
+  if (extension === "avif") return "image/avif";
+  if (extension === "bmp") return "image/bmp";
+  if (VIDEO_EXTENSIONS.has(extension)) return getVideoMimeType(filePath);
+  if (AUDIO_EXTENSIONS.has(extension)) return getAudioMimeType(filePath);
   return "application/octet-stream";
 }
 
@@ -2294,7 +2510,7 @@ class NativePresentationController {
   }
 
   getUnavailableMessage(extension) {
-    return "Microsoft PowerPoint is not available for native PPTX playback.";
+    return "Microsoft PowerPoint is not available for native presentation playback.";
   }
 
   isSessionForItem(item) {
@@ -3054,32 +3270,56 @@ class CanvasPlayerModal extends Modal {
     const shouldAutoplayVideo = options.autoplayVideo && this.items[index]?.type === "video";
     const previousIndex = this.index;
     const previousItem = this.items[previousIndex] || null;
-    ++this.transitionToken;
+    const token = ++this.transitionToken;
     this.pendingVideoPlayToken += 1;
     this.pendingVideoPlayIndex = shouldAutoplayVideo ? index : null;
     this.index = index;
     this.updateOutline();
 
     const targetSlideEl = this.ensureSlide(index);
+    const cached = this.slideCache.get(index);
     const previousSlideEl = this.activeSlideEl;
-    this.activeSlideEl = targetSlideEl;
-    targetSlideEl.addClass("is-active");
 
-    if (previousSlideEl && previousSlideEl !== targetSlideEl) {
-      this.pauseSlideMedia(previousSlideEl);
-      previousSlideEl.removeClass("is-active");
+    const reveal = () => {
+      if (this.transitionToken !== token) return;
+      this.activeSlideEl = targetSlideEl;
+      targetSlideEl.addClass("is-active");
+      if (previousSlideEl && previousSlideEl !== targetSlideEl) {
+        this.pauseSlideMedia(previousSlideEl);
+        previousSlideEl.removeClass("is-active");
+      }
+      this.handleActiveItemChanged(previousIndex === index ? null : previousItem, this.items[index], index);
+      if (this.items[index]?.type === "video") {
+        this.resizeActiveVideo();
+      }
+      if (shouldAutoplayVideo) {
+        this.autoplayVideoAtIndex(index);
+      }
+    };
+
+    // Keep the outgoing slide on screen until the incoming one has painted, so we
+    // never flash the black letterbox between slides. Reveal immediately when the
+    // slide is already cached, and cap the wait so a slow render can't freeze nav.
+    if (cached?.rendered || !previousSlideEl || previousSlideEl === targetSlideEl) {
+      reveal();
+    } else {
+      let settled = false;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        reveal();
+      };
+      cached?.ready?.then(settle, settle);
+      window.setTimeout(settle, MAX_TRANSITION_HOLD_MS);
     }
+
+    // Warm the most likely next targets right away; the wider radius waits for idle.
+    if (index + 1 < this.items.length) this.ensureSlide(index + 1);
+    if (index - 1 >= 0) this.ensureSlide(index - 1);
 
     this.trimCache(index);
     this.deferPreloadAround(index);
     this.syncFocusGuard();
-    this.handleActiveItemChanged(previousIndex === index ? null : previousItem, this.items[index], index);
-    if (this.items[index]?.type === "video") {
-      this.resizeActiveVideo();
-    }
-    if (shouldAutoplayVideo) {
-      this.autoplayVideoAtIndex(index);
-    }
   }
 
   pauseSlideMedia(slideEl) {
@@ -3266,7 +3506,7 @@ class CanvasPlayerModal extends Modal {
     const item = this.items[index];
     const slideEl = this.contentHostEl.createDiv({ cls: "canvas-player-slide" });
     slideEl.dataset.slideIndex = String(index);
-    const cachedSlide = { el: slideEl, ready: null, cleanup: null, disposed: false };
+    const cachedSlide = { el: slideEl, ready: null, cleanup: null, disposed: false, rendered: false };
     const ready = this.renderSlide(slideEl, item).then((cleanup) => {
       if (typeof cleanup === "function") {
         if (cachedSlide.disposed) {
@@ -3275,9 +3515,11 @@ class CanvasPlayerModal extends Modal {
           cachedSlide.cleanup = cleanup;
         }
       }
+      cachedSlide.rendered = true;
       slideEl.addClass("is-ready");
       return slideEl;
     }).catch((error) => {
+      cachedSlide.rendered = true;
       renderSlideError(slideEl, `Could not render ${item.title || "slide"}.`, error);
       slideEl.addClass("is-ready");
       return slideEl;
@@ -3291,7 +3533,7 @@ class CanvasPlayerModal extends Modal {
     if (item.type === "image") {
       const img = slideEl.createEl("img", { attr: { src: this.app.vault.getResourcePath(item.file), alt: item.title } });
       img.draggable = false;
-      const loaded = await waitForMediaLoad(img);
+      const loaded = await decodeImage(img);
       if (!loaded) {
         img.remove();
         renderSlideError(slideEl, `Could not load image: ${item.title}`);
@@ -3420,13 +3662,16 @@ class CanvasPlayerModal extends Modal {
     const video = shell.createEl("video", {
       cls: "canvas-player-video",
       attr: {
-        src: this.app.vault.getResourcePath(item.file),
         playsinline: "true",
         preload: "auto",
         tabindex: "-1",
         ...(shouldAutoplay ? { autoplay: "true" } : {}),
       },
     });
+    const source = document.createElement("source");
+    source.src = this.app.vault.getResourcePath(item.file);
+    source.type = getVideoMimeType(item.file?.path || item.title || "");
+    video.appendChild(source);
     video.setAttribute("disablepictureinpicture", "true");
     video.controls = false;
     video.preload = "auto";
@@ -3434,6 +3679,10 @@ class CanvasPlayerModal extends Modal {
     video.addEventListener("loadedmetadata", () => this.updateVideoAspectRatio(shell, video));
     video.addEventListener("play", () => this.focusStageSoon());
     video.addEventListener("keydown", this.keyHandler, true);
+    video.addEventListener("error", () => {
+      if (video.readyState >= 1) return;
+      renderSlideError(slideEl, `Could not load video: ${cleanOutlineTitle(item.title)}`, new Error(getMediaElementErrorMessage(video, item.file)));
+    }, { once: true });
     const playFromUserAction = (event) => {
       event?.preventDefault?.();
       event?.stopPropagation?.();
@@ -3444,6 +3693,10 @@ class CanvasPlayerModal extends Modal {
       this.requestVideoPlayback(index, video);
     }
     await waitForMediaLoad(video);
+    if (video.error && video.readyState < 1) {
+      renderSlideError(slideEl, `Could not load video: ${cleanOutlineTitle(item.title)}`, new Error(getMediaElementErrorMessage(video, item.file)));
+      return;
+    }
     this.updateVideoAspectRatio(shell, video);
     if (shouldAutoplay && this.index === index && video.paused) {
       this.requestVideoPlayback(index, video);
@@ -3517,7 +3770,7 @@ class CanvasPlayerModal extends Modal {
       attr: { src: item.url, alt: item.title },
     });
     img.draggable = false;
-    const loaded = await waitForMediaLoad(img);
+    const loaded = await decodeImage(img);
     if (!loaded) {
       img.remove();
       renderSlideError(slideEl, `Could not load remote slide: ${item.title}`);
@@ -3525,7 +3778,7 @@ class CanvasPlayerModal extends Modal {
   }
 
   async renderLocalCachedImageSlide(slideEl, item, options = {}) {
-    const source = this.createLocalImageSource(item.cachePath);
+    const source = await this.createLocalImageSource(item.cachePath);
     const img = slideEl.createEl("img", {
       cls: options.className || "canvas-player-cached-slide-image",
       attr: {
@@ -3534,19 +3787,24 @@ class CanvasPlayerModal extends Modal {
       },
     });
     img.draggable = false;
-    const loaded = await waitForMediaLoad(img);
+    const loaded = await decodeImage(img);
     if (!loaded) {
       img.remove();
       source.cleanup();
       renderSlideError(slideEl, `Could not load ${options.errorLabel || "cached slide"}: ${item.title}`);
       return;
     }
-    return () => source.cleanup();
+    // The bitmap is now decoded and retained by the <img>, so the backing blob
+    // buffer can be released immediately instead of pinned until slide disposal.
+    // This keeps warmed decks from holding one multi-megabyte buffer per slide.
+    source.cleanup();
+    return () => {};
   }
 
-  createLocalImageSource(filePath) {
+  async createLocalImageSource(filePath) {
     if (canCreateBrowserObjectUrl() && fs.existsSync(filePath)) {
-      const buffer = fs.readFileSync(filePath);
+      // Async read keeps a multi-megabyte PNG off the main thread during render.
+      const buffer = await fs.promises.readFile(filePath);
       const objectUrl = window.URL.createObjectURL(new window.Blob([buffer], {
         type: getImageMimeType(filePath),
       }));
@@ -3751,12 +4009,14 @@ class CanvasPlayerModal extends Modal {
     const min = Math.max(0, index - PRELOAD_RADIUS);
     const max = Math.min(this.items.length - 1, index + PRELOAD_RADIUS);
     for (const [cachedIndex, cached] of this.slideCache.entries()) {
-      if (cachedIndex < min || cachedIndex > max) {
-        cached.disposed = true;
-        cached.cleanup?.();
-        cached.el.remove();
-        this.slideCache.delete(cachedIndex);
-      }
+      if (cachedIndex >= min && cachedIndex <= max) continue;
+      // Never evict the slide that is still on screen — during a transition hold
+      // the outgoing slide stays visible even when it is outside the radius.
+      if (cached.el === this.activeSlideEl) continue;
+      cached.disposed = true;
+      cached.cleanup?.();
+      cached.el.remove();
+      this.slideCache.delete(cachedIndex);
     }
   }
 
@@ -4258,7 +4518,7 @@ function getPresentationTitleFromUrl(rawUrl) {
 function getOutlineDetail(item) {
   if (item.type === "pptx-page" && item.pageCount > 1) return `${item.pageCount}p`;
   if (item.type === "pptx-page") return "PPTX";
-  if (item.type === "native-presentation") return "PPTX";
+  if (item.type === "native-presentation") return String(item.file?.extension || "PPT").toUpperCase();
   if (item.type === "pdf-image" && item.pageCount > 1) return `${item.pageCount}p`;
   if (item.type === "pdf-image") return "PDF";
   if (item.type === "pdf-page" && item.pageCount > 1) return `${item.pageCount}p`;
@@ -4288,6 +4548,20 @@ function findActiveOutlineEntry(entries, index) {
   return active;
 }
 
+async function decodeImage(img) {
+  // Decode the bitmap up front (during preload) so swapping the slide in does not
+  // trigger a synchronous decode of a multi-megabyte PNG on the navigation frame.
+  if (typeof img.decode === "function") {
+    try {
+      await img.decode();
+      return true;
+    } catch (_error) {
+      // decode() can reject spuriously (e.g. detached node); fall back to events.
+    }
+  }
+  return waitForMediaLoad(img);
+}
+
 function waitForMediaLoad(element) {
   return new Promise((resolve) => {
     if (element instanceof HTMLImageElement && element.complete) {
@@ -4311,6 +4585,16 @@ function waitForMediaLoad(element) {
     element.addEventListener("error", () => done(false), { once: true });
     window.setTimeout(() => done(true), 1800);
   });
+}
+
+function getMediaElementErrorMessage(mediaElement, file) {
+  const extension = getExtension(file?.path || file?.name || "");
+  const code = mediaElement?.error?.code;
+  if (code === 1) return "Media loading was aborted.";
+  if (code === 2) return "The media file could not be read from Obsidian.";
+  if (code === 3) return `The .${extension || "media"} file could not be decoded. The container may be supported, but the codec may not be playable in Electron.`;
+  if (code === 4) return `The .${extension || "media"} file is not playable by this Electron/Chromium build. For MOV, H.264/AAC-encoded QuickTime files are the most reliable.`;
+  return `The .${extension || "media"} file did not become playable. The codec may not be supported by Electron.`;
 }
 
 function renderSlideError(slideEl, message, error) {

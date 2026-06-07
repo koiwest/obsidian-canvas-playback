@@ -25,7 +25,7 @@ Then I realized that Canvas is already an excellent presentation console. I can 
 - 按 Canvas 连接线决定播放顺序；有多条连接链时，从最左上方的火车头节点开始，只播放这一条链。
 - 无连接线时，按从左到右、从上到下播放。
 - PDF 逐页展开为独立播放步骤。
-- PPT、PPTX、PPS、POT 等 PowerPoint 文件会在插件内直接解析并逐页渲染，按键行为和 PDF 一致；PPTX 内部 slide 跳转会映射到对应播放步骤，嵌入的视频/音频会作为可播放媒体层叠在 slide 上。`.key` 文件会在插件内解析并按页播放；当前先使用包内嵌的 slide thumbnails。ODP 仍会走 PDF 链路。
+- PPTX、PPSX、POTX 等新版 PowerPoint 文件会在插件内直接解析并逐页渲染，按键行为和 PDF 一致；PPTX 内部 slide 跳转会映射到对应播放步骤，嵌入的视频/音频会作为可播放媒体层叠在 slide 上。旧 `.ppt` / `.pps` / `.pot` 会优先使用同名 PDF，或交给 Microsoft PowerPoint 原生放映兜底；ODP 仍会走 PDF 链路。`.key` 文件会在插件内解析并按页播放；当前先使用包内嵌的 slide thumbnails。
 - 支持图片、视频、音频、Markdown、`.deck`、网页链接、Figma、Gamma、Canva、Google Slides、Prezi 等在线演示链接和纯文本节点。
 - 打开 Canvas 时会扫描主播放链，并提前缓存前 N 页 Figma Slides PNG，减少播放时等待。
 - 配置 Figma access token 后，Figma Slides 会展开为逐页本地高清 PNG，按键行为和 PDF 一致。
@@ -39,7 +39,7 @@ Then I realized that Canvas is already an excellent presentation console. I can 
 - Uses Canvas edges as the playback order; when multiple chains exist, playback starts from the top-left train-head node and only follows that chain.
 - Falls back to left-to-right, top-to-bottom order when no edges exist.
 - Expands PDFs into individual page steps.
-- Renders PowerPoint decks inside Canvas Playback itself instead of handing them off to another app. PowerPoint slides expand into page steps like PDFs, internal slide jumps map to the matching playback step, and embedded video/audio is overlaid as playable media. `.key` files are parsed inside the plugin and currently play through embedded slide thumbnails; ODP sources still resolve through PDFs.
+- Renders modern PowerPoint decks (`.pptx`, `.ppsx`, `.potx`) inside Canvas Playback itself instead of handing them off to another app. PowerPoint slides expand into page steps like PDFs, internal slide jumps map to the matching playback step, and embedded video/audio is overlaid as playable media. Legacy `.ppt` / `.pps` / `.pot` files use a sibling PDF when available, or fall back to native Microsoft PowerPoint slideshow playback; ODP sources still resolve through PDFs. `.key` files are parsed inside the plugin and currently play through embedded slide thumbnails.
 - Supports images, videos, audio, Markdown, `.deck`, web links, Figma, Gamma, Canva, Google Slides, Prezi, and other online presentation links.
 - Scans the main playback chain when a Canvas opens and preloads the first N Figma Slides PNGs into the local cache.
 - With a Figma access token configured, Figma Slides expand into local high-resolution PNG page steps controlled like PDFs.
@@ -82,7 +82,7 @@ Then I realized that Canvas is already an excellent presentation console. I can 
 
 图片：`png`, `jpg`, `jpeg`, `webp`, `gif`, `svg`, `avif`, `bmp`
 
-视频：`mp4`, `mov`, `m4v`, `webm`, `ogv`, `avi`, `mkv`
+视频：`mp4`, `mov`, `m4v`, `webm`, `ogv`, `avi`, `mkv`。`.mov` / `.m4v` 会按 `video/mp4` 加载，复用与 MP4 相同的解复用器（两者同属 ISO 基础媒体容器）；实际播放仍取决于当前 Electron/Chromium 支持的编码，H.264/AAC 最稳。
 
 音频：`mp3`, `m4a`, `aac`, `wav`, `ogg`, `opus`, `flac`
 
@@ -98,7 +98,7 @@ Figma Slides：配置 token 后，会通过 Figma REST API 读取文件结构，
 
 Images: `png`, `jpg`, `jpeg`, `webp`, `gif`, `svg`, `avif`, `bmp`
 
-Videos: `mp4`, `mov`, `m4v`, `webm`, `ogv`, `avi`, `mkv`
+Videos: `mp4`, `mov`, `m4v`, `webm`, `ogv`, `avi`, `mkv`. `.mov` / `.m4v` are loaded as `video/mp4` so they reuse the same demuxer as MP4 (both are ISO base-media containers); actual playback still depends on codecs supported by the current Electron/Chromium build, with H.264/AAC being the safest.
 
 Audio: `mp3`, `m4a`, `aac`, `wav`, `ogg`, `opus`, `flac`
 
