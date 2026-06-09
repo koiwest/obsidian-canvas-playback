@@ -3289,6 +3289,7 @@ class CanvasPlayerModal extends Modal {
         previousSlideEl.removeClass("is-active");
       }
       this.handleActiveItemChanged(previousIndex === index ? null : previousItem, this.items[index], index);
+      this.tuneVideoPreload();
       if (this.items[index]?.type === "video") {
         this.resizeActiveVideo();
       }
@@ -3320,6 +3321,21 @@ class CanvasPlayerModal extends Modal {
     this.trimCache(index);
     this.deferPreloadAround(index);
     this.syncFocusGuard();
+  }
+
+  tuneVideoPreload() {
+    // Keep exactly one video buffering: the active slide gets "auto", every other
+    // mounted video drops back to "metadata" so Chromium releases its forward
+    // buffer. This caps video memory regardless of how many heavy clips sit inside
+    // the ±PRELOAD_RADIUS window.
+    for (const [cachedIndex, cached] of this.slideCache.entries()) {
+      const videos = cached.el?.querySelectorAll?.("video");
+      if (!videos || !videos.length) continue;
+      const desired = cachedIndex === this.index ? "auto" : "metadata";
+      videos.forEach((video) => {
+        if (video.preload !== desired) video.preload = desired;
+      });
+    }
   }
 
   pauseSlideMedia(slideEl) {
@@ -3659,11 +3675,16 @@ class CanvasPlayerModal extends Modal {
     const shell = slideEl.createDiv({ cls: "canvas-player-video-shell" });
     const index = Number(slideEl.dataset.slideIndex);
     const shouldAutoplay = this.pendingVideoPlayIndex === index && this.index === index;
+    // Only the active slide's video should buffer its full stream. Off-screen
+    // neighbors that the preloader mounts stay at "metadata" so several large
+    // videos (e.g. a 165MB clip) never buffer into memory at once, which is what
+    // pushed Electron's renderer over its memory budget and flashed a black screen.
+    const initialPreload = this.index === index ? "auto" : "metadata";
     const video = shell.createEl("video", {
       cls: "canvas-player-video",
       attr: {
         playsinline: "true",
-        preload: "auto",
+        preload: initialPreload,
         tabindex: "-1",
         ...(shouldAutoplay ? { autoplay: "true" } : {}),
       },
@@ -3674,7 +3695,7 @@ class CanvasPlayerModal extends Modal {
     video.appendChild(source);
     video.setAttribute("disablepictureinpicture", "true");
     video.controls = false;
-    video.preload = "auto";
+    video.preload = initialPreload;
     video.playsInline = true;
     video.addEventListener("loadedmetadata", () => this.updateVideoAspectRatio(shell, video));
     video.addEventListener("play", () => this.focusStageSoon());
